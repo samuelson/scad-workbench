@@ -8,7 +8,9 @@ REQUIRED := index.html js/app.js js/render-worker.js css/style.css LICENSE \
 	fonts/LiberationSans-Regular.ttf vendor/openscad-wasm/openscad.wasm \
 	vendor/three/three.module.js
 
-.PHONY: all catalog vendor serve check clean help
+SITE := _site
+
+.PHONY: all catalog vendor serve site check clean help
 
 all: vendor catalog
 
@@ -26,6 +28,13 @@ serve: vendor catalog
 	@echo "Serving on http://127.0.0.1:$(PORT)/"
 	$(PYTHON) -m http.server $(PORT)
 
+site: vendor catalog
+	rm -rf $(SITE)
+	mkdir -p $(SITE)
+	cp index.html favicon.svg $(SITE)/
+	cp -a css js models fonts vendor $(SITE)/
+	touch $(SITE)/.nojekyll
+
 check: vendor catalog
 	@test -s $(CATALOG)
 	@$(PYTHON) -c "import json, pathlib, sys; \
@@ -38,6 +47,7 @@ sys.exit('missing model files: ' + ', '.join(missing) if missing else 0)"
 
 clean:
 	rm -f $(CATALOG)
+	rm -rf $(SITE)
 
 help:
 	@echo "SCAD Workbench"
@@ -46,8 +56,9 @@ help:
 	@echo "  make vendor   download OpenSCAD WASM and Three.js into vendor/"
 	@echo "  make catalog  rebuild models/catalog.json from models/*.scad"
 	@echo "  make serve    fetch vendors, rebuild the catalog, then serve on PORT ($(PORT))"
+	@echo "  make site     build a static tree in _site/ for GitHub Pages"
 	@echo "  make check    verify catalog paths and required static files"
-	@echo "  make clean    remove the generated catalog"
+	@echo "  make clean    remove the generated catalog and _site/"
 	@echo "  make help     show this text"
 	@echo
 	@echo "Add a library model by dropping a .scad file in models/ and running make."

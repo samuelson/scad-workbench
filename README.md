@@ -44,6 +44,12 @@ To add library models, place `.scad` files in `models/` and run `make`. The libr
 // description: 25.4–76.2 mm tubing · zip tie eyelet
 ```
 
+## GitHub Pages
+
+Pushes to `main` run `.github/workflows/pages.yml`: `make site` fetches vendors, rebuilds `models/catalog.json` from every `models/*.scad` file, and deploys `_site/`. Adding or changing a model on `main` therefore updates the live library. You can also run the workflow by hand from the Actions tab.
+
+In the GitHub repo, set **Settings → Pages → Source** to **GitHub Actions** once. The site URL is `https://<user>.github.io/scad-workbench/` for a project repo.
+
 ## Hosting notes
 
 Serve `.wasm` assets with `application/wasm` when configuring a server manually. Keep the relative asset paths intact. A browser with WebAssembly and WebGL support is required for rendering and 3D preview. The initial OpenSCAD engine download is several megabytes.
