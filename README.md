@@ -2,44 +2,48 @@
 
 This is the source for the SCAD Workbench site: a browser-based OpenSCAD editor with a parameter panel, 3D STL preview, local `.scad` import, and STL download. The bundled library contains the mast antenna clip.
 
+This project is licensed under **GPL-2.0-only**. See `LICENSE`. Third-party code and fonts are listed in `THIRD_PARTY.md`.
+
 ## Quick deployment
 
-The `dist/` folder in this archive is already built. Serve its contents from any static HTTP(S) web server. Keep `index.html`, `assets/`, `models/`, and `favicon.svg` together. The app can be hosted at the domain root or under a subdirectory.
+Clone the repository, then fetch the OpenSCAD WASM engine and Three.js:
+
+```bash
+make
+```
+
+That writes `vendor/` (gitignored) and `models/catalog.json`. Serve the tree from any static HTTP(S) web server. Keep `index.html`, `css/`, `js/`, `vendor/`, `models/`, `fonts/`, and `favicon.svg` together. The app can be hosted at the domain root or under a subdirectory.
 
 Do **not** open `index.html` with a `file://` URL; browser workers and WebAssembly require an HTTP(S) origin.
 
 For a local check:
 
 ```bash
-python3 -m http.server 8000 --directory dist
+make serve
 ```
 
-Then open `http://localhost:8000/`.
+Then open `http://localhost:8000/`. Override the port with `make serve PORT=8080`.
 
-## Build from source
-
-Requires Node.js 20.19 or newer and npm.
-
-```bash
-npm ci
-npm run dev       # development server
-npm run build     # outputs dist/
-```
-
-For a local production preview, run `npm run preview` and open the address it prints. To publish, serve the new `dist/` folder through your static web server. No backend, database, or API key is needed. The OpenSCAD engine and model rendering run in the visitor's browser.
+`make catalog` scans `models/*.scad` and writes `models/catalog.json`. Node.js is not required. Python 3 is used for the catalog script, vendor download, and the optional local server. The first `make` needs network access to download pinned packages from the npm registry.
 
 ## Main files
 
-- `src/App.tsx` — interface, local file loading, render actions, and 3D viewer
-- `src/render-worker.ts` — OpenSCAD WebAssembly rendering worker
-- `src/scad-parameters.ts` — parameter detection and source updates
-- `src/style.css` — layout and visual styling
-- `public/models/mast-antenna-clip.scad` — bundled parametric model
+- `js/app.js` — interface, local file loading, render actions, and parameter panel
+- `js/render-worker.js` — OpenSCAD WebAssembly rendering worker
+- `js/scad-parameters.js` — parameter detection and source updates
+- `js/viewer.js` — Three.js STL preview
+- `css/style.css` — layout and visual styling
+- `models/*.scad` — bundled parametric models
+- `fonts/` — Liberation and DejaVu fonts used by engraved labels
+- `Makefile` — vendor fetch, catalog generation, local server, and asset checks
 
-To add library models, place `.scad` files in `public/models/` and add entries to the `models` array in `src/App.tsx`.
+To add library models, place `.scad` files in `models/` and run `make`. The library name comes from the file name; the sidebar subtitle is the first `//` comment. Optional overrides at the top of a file:
+
+```
+// name: Mast antenna clip
+// description: 25.4–76.2 mm tubing · zip tie eyelet
+```
 
 ## Hosting notes
 
-Serve `.wasm` assets with `application/wasm` when configuring a server manually. Keep the built asset paths intact. A browser with WebAssembly and WebGL support is required for rendering and 3D preview. The initial OpenSCAD engine download is several megabytes.
-
-The project depends on `@lofcz/openscad-wasm`, which includes OpenSCAD under GPL-2.0-only. Review that package's license when redistributing the built site. Other dependency licenses are available through their npm packages.
+Serve `.wasm` assets with `application/wasm` when configuring a server manually. Keep the relative asset paths intact. A browser with WebAssembly and WebGL support is required for rendering and 3D preview. The initial OpenSCAD engine download is several megabytes.

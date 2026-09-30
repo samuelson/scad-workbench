@@ -1,3 +1,5 @@
+// name: Mast antenna clip
+// description: 25.4–76.2 mm tubing · zip tie eyelet
 // Mast antenna wire clip — print flat in PETG or another flexible filament.
 // The C-shaped body grips round tubing; thread a small zip tie through the side eyelet.
 // Tube diameter is the tubing's outside diameter in millimeters.

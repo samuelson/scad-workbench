@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Degree band",
+    "description": "Circular ring with a 360° scale on the outer face",
+    "path": "./models/degree-band.scad"
+  },
+  {
+    "name": "Mast antenna clip",
+    "description": "25.4–76.2 mm tubing · zip tie eyelet",
+    "path": "./models/mast-antenna-clip.scad"
+  }
+]
