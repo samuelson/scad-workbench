@@ -338,6 +338,7 @@ function paintChrome() {
   document.querySelector('[data-icon="sliders"]').innerHTML = icons.sliders(16);
   document.querySelector('[data-icon="box-empty"]').innerHTML = icons.box(30, 1.3);
   els.openTop.innerHTML = `${icons.upload()} Open local file`;
+  document.getElementById("source-link").innerHTML = `${icons.github()} Source`;
   els.resetView.innerHTML = `${icons.rotateCcw()} <span>Reset view</span>`;
   els.dismissError.innerHTML = icons.x();
   els.modelCount.textContent = String(models.length).padStart(2, "0");
