@@ -1,8 +1,28 @@
 [
   {
+    "name": "5.8 GHz mesh dish",
+    "description": "400 mm prime-focus mesh · pole clamp · four-piece print",
+    "path": "./models/58ghz_mesh_dish.scad"
+  },
+  {
+    "name": "915mhz circular slotted waveguide",
+    "description": "",
+    "path": "./models/915mhz_circular_slotted_waveguide.scad"
+  },
+  {
+    "name": "915mhz slotted waveguide",
+    "description": "",
+    "path": "./models/915mhz_slotted_waveguide.scad"
+  },
+  {
     "name": "Degree band",
     "description": "Circular ring with a 360° scale on the outer face",
     "path": "./models/degree-band.scad"
+  },
+  {
+    "name": "Feedhorn 58ghz",
+    "description": "",
+    "path": "./models/feedhorn_58ghz.scad"
   },
   {
     "name": "Mast antenna clip",
