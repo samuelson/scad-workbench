@@ -9,7 +9,8 @@
 //
 // Vertex at the origin, opening toward +Z, focus at z = focal_length.
 // +Y is up when installed, so the hollow arm at 270° points down and its
-// rim mouth drains water out.
+// rim mouth drains water out. rear_box seals that mouth into a Pi box inset
+// from the inner dish face; the lid faces the same way as the pole bracket.
 //
 // part selects the solid to export. Each quadrant seam is the plane of one
 // side of that quadrant's arm, so the arm side and the dish cut lie on the
@@ -21,7 +22,7 @@
 // at the hub. The pole bracket's plug fills that square, flush with the dish.
 
 /* [Selection] */
-part = "assembly"; // [assembly,quadrant_1,quadrant_2,quadrant_3,quadrant_4,front_lid,back_lid,gasket,pole_bracket]
+part = "assembly"; // [assembly,quadrant_1,quadrant_2,quadrant_3,quadrant_4,front_lid,back_lid,gasket,pole_bracket,rear_lid,rear_gasket]
 fast_preview = false;
 
 /* [Dish and RF] */
@@ -36,7 +37,7 @@ skin_thickness = 0.8; // [0.8:0.1:2.5]
 honeycomb_pitch = 60; // [12:1:60]
 honeycomb_rib = 1.2; // [1.2:0.1:4]
 honeycomb_depth = 10; // [6:1:18]
-hub_radius = 30; // [30:1:70]
+hub_radius = 50; // [30:1:70]
 hub_thickness = 12; // [8:1:20]
 rim_width = 4; // [2:1:16]
 rim_depth = 8; // [4:1:16]
@@ -62,6 +63,19 @@ arm_width = 20; // [16:0.5:36]
 arm_height = 20; // [16:0.5:36]
 arm_wall = 2; // [2:2:4]
 radome_thickness = 0.8; // [0.8:0.1:2.5]
+
+/* [Rear box] */
+rear_box = false;
+// Split a centered box across quadrant_3 and quadrant_4.
+rear_box_split = true;
+// Extra +X on the one-piece box. 0 parks the −X wall on the q4 seam.
+rear_box_x = 0; // [0:0.5:40]
+// Outer size across the arm (X). Fits a Pi 4/5 board plus walls.
+rear_box_w = 104; // [70:1:160]
+// Outer size along the arm (Y). Board plus feed-bore keep-out.
+rear_box_l = 92; // [60:1:140]
+// Extra depth behind the dish back at the hub-ward edge.
+rear_box_depth = 28; // [16:1:60]
 
 /* [Pole bracket] */
 pole_diameter = 32; // [20:0.5:60]
@@ -145,6 +159,14 @@ station_pitch = max(clamp_pitch, min_clamp_pitch);
 flange_hx = v_half + v_wall;
 flange_hy = station_pitch / 2 + cheek_y / 2;
 plug_side = arm_width - plug_fit;
+rear_front_t = max(enclosure_wall, skin_thickness);
+pi_hole_span_x = 58;
+pi_hole_span_y = 49;
+pi_standoff_h = 6;
+pi_standoff_d = 6.4;
+pi_pilot_d = 2.05;
+rear_boss_inset = post_r + 0.8;
+rear_hatch_inset = rear_boss_inset + post_r + 1;
 
 echo(lambda_mm=lambda_mm, surface_opening_mm=surface_opening, rim_slope_deg=rim_slope_deg);
 echo(xy_opening_mm=xy_opening, xy_pitch_mm=xy_pitch, open_fraction=open_fraction);
@@ -172,6 +194,35 @@ if (clamp_pitch < min_clamp_pitch)
 function z_of(r) = r * r / (4 * focal_length);
 function ang_of(r) = atan(r / (2 * focal_length));
 function back_pt(r, t) = let(a = ang_of(r)) [r + t * sin(a), z_of(r) - t * cos(a)];
+
+function rear_cx() = rear_box_split ? 0 : (-arm_width / 2 + rear_box_w / 2 + rear_box_x);
+function rear_rim_outer() = back_pt(dish_r, rim_back_t)[0];
+function rear_x0() = rear_cx() - rear_box_w / 2;
+function rear_x1() = rear_cx() + rear_box_w / 2;
+function rear_x_out() = max(abs(rear_x0()), abs(rear_x1()));
+function rear_y_hub() = -rear_rim_outer() + rear_box_l;
+function rear_r_hub() =
+    let(
+        yh = rear_y_hub(),
+        xn = rear_x0() * rear_x1() <= 0 ? 0 : (abs(rear_x0()) < abs(rear_x1()) ? rear_x0() : rear_x1())
+    )
+        sqrt(xn * xn + yh * yh);
+function rear_z_lid() = back_pt(rear_r_hub(), honeycomb_back)[1] - rear_box_depth;
+function rear_z_top() = z_of(dish_r) + 1;
+function pi_cx() = rear_cx();
+function pi_cy() = (rear_y_hub() - rear_rim_outer()) / 2 + 6;
+function pi_z_top() = rear_z_lid() + lip_t + 16;
+function rear_cav_x0() = rear_x0() + enclosure_wall;
+function rear_cav_x1() = rear_x1() - enclosure_wall;
+function rear_boss_rim_y(x) =
+    let(ri = rear_rim_outer() - rear_boss_inset)
+        -sqrt(max(ri * ri - x * x, 1));
+function rear_boss_xy() = [
+    [rear_x0() + rear_boss_inset, rear_y_hub() - rear_boss_inset],
+    [rear_x1() - rear_boss_inset, rear_y_hub() - rear_boss_inset],
+    [rear_x0() + rear_boss_inset, rear_boss_rim_y(rear_x0() + rear_boss_inset)],
+    [rear_x1() - rear_boss_inset, rear_boss_rim_y(rear_x1() - rear_boss_inset)]
+];
 
 function vsub(a, b) = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 function vadd(a, b) = [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -212,6 +263,36 @@ echo(arm_angle_deg=atan2(
 assert(arm_len(270) > 20, "Hollow arm is too short");
 assert(enclosure_size > arm_width + 4, "Arm is wider than the enclosure face");
 assert(enclosure_height >= arm_height, "Enclosure is shorter than the arm");
+if (rear_box) {
+    assert(rear_x_out() < rear_rim_outer() - 2, "Rear box is wider than the rim");
+    assert(rear_hatch_inset > groove_w, "Rear hatch leaves no gasket land");
+    assert(rear_box_depth >= 16, "Rear box is too shallow behind the dish");
+    assert(rear_z_lid() < back_pt(rear_r_hub(), honeycomb_back)[1] - 2, "Rear lid is not behind the dish");
+    assert(rear_y_hub() < -arm_width / 2 - 4, "Rear box reaches the hub square");
+    assert(
+        rear_y_hub() * rear_y_hub() + rear_x_out() * rear_x_out()
+            < rear_rim_outer() * rear_rim_outer(),
+        "Rear box hub edge is outside the rim"
+    );
+    assert(
+        rear_cav_x0() <= -feed_bore_width / 2 + 0.05
+            && rear_cav_x1() >= feed_bore_width / 2,
+        "Feed bore does not open into the rear box"
+    );
+    assert(
+        rear_box_split || rear_x0() >= -arm_width / 2 - 0.05,
+        "One-piece rear box leaves quadrant 4"
+    );
+    assert(
+        !rear_box_split || (rear_x0() < -arm_width / 2 && rear_x1() > -arm_width / 2),
+        "Split rear box does not cross the q3/q4 seam"
+    );
+    assert(
+        abs(pi_cx()) - pi_hole_span_x / 2 > feed_bore_width / 2 + pi_standoff_d / 2
+            || abs(pi_cy() + arm_rim_r()) > feed_bore_height + pi_standoff_d,
+        "Pi standoffs sit in the feed bore"
+    );
+}
 
 // The bed is one side face of the arm. Material is on the +up side of that plane.
 function bed_up(q) =
@@ -255,13 +336,33 @@ function region_samples(q) =
     q == 2 ? [[-a, a], [-s, a], [-a, -s], [-d, -d]] :
     [[-a, -a], [s, -a], [-a, -s], [d, -d]];
 
+function rear_box_sample_pts(q) =
+    let(
+        a = arm_width / 2,
+        r = rear_rim_outer(),
+        corners = [
+            [rear_x0(), rear_y_hub()],
+            [rear_x1(), rear_y_hub()],
+            [rear_x0(), -sqrt(max(r * r - rear_x0() * rear_x0(), 0))],
+            [rear_x1(), -sqrt(max(r * r - rear_x1() * rear_x1(), 0))]
+        ]
+    )
+    [for (c = corners, z = [rear_z_lid() - lid_t, rear_z_top()])
+        let(xc = q == 3 ? max(c[0], -a) : (q == 2 ? min(c[0], -a) : c[0]))
+            [xc, c[1], z]];
+
+function rear_box_quad_pts(q) =
+    !rear_box ? [] :
+    (q == 3 || (rear_box_split && q == 2)) ? rear_box_sample_pts(q) : [];
+
 function quad_samples(q) =
     let(th = arm_theta(q))
     concat(
         [for (xy = region_samples(q), z = [-hub_thickness, focal_length + enclosure_height])
             [xy[0], xy[1], z]],
         [rim_outer(th), focus_pt(th), outer_pt(th)],
-        prism_corners(q)
+        prism_corners(q),
+        rear_box_quad_pts(q)
     );
 
 function printed(q) = [for (p = quad_samples(q)) to_print(q, p)];
@@ -420,14 +521,15 @@ module feed_void() {
     n_back = [rad[0] * sin(a), rad[1] * sin(a), -cos(a)];
     through = rim_back_t + arm_height / 2 + 4;
     arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 0);
-    intersection() {
-        frame_cube(
-            vadd(arm_rim(th), vmul(n_back, through / 2)),
-            n_back, arm_az(th), [0, 0, 1],
-            [through, feed_bore_width, feed_bore_height]
-        );
-        para_shell(0, rim_back_t + arm_height + 20, dish_r - rim_width - 8, dish_r + 30);
-    }
+    if (!rear_box)
+        intersection() {
+            frame_cube(
+                vadd(arm_rim(th), vmul(n_back, through / 2)),
+                n_back, arm_az(th), [0, 0, 1],
+                [through, feed_bore_width, feed_bore_height]
+            );
+            para_shell(0, rim_back_t + arm_height + 20, dish_r - rim_width - 8, dish_r + 30);
+        }
 }
 
 module rounded_square(half, rad) {
@@ -518,6 +620,170 @@ module lid(front) {
 module gasket() {
     linear_extrude(gasket_h)
         gasket_2d();
+}
+
+module rear_box_2d(grow = 0) {
+    offset(delta = grow)
+        intersection() {
+            translate([rear_x0(), -rear_rim_outer() - 1])
+                square([rear_box_w, rear_y_hub() + rear_rim_outer() + 1]);
+            circle(r = rear_rim_outer(), $fn = shell_fn);
+        }
+}
+
+module rear_box_inner_2d() {
+    offset(delta = -enclosure_wall)
+        rear_box_2d();
+}
+
+module rear_hatch_2d() {
+    offset(delta = -rear_hatch_inset)
+        rear_box_2d();
+}
+
+module rear_box_cavity() {
+    difference() {
+        intersection() {
+            translate([0, 0, rear_z_lid() + lip_t])
+                linear_extrude(rear_z_top() - rear_z_lid())
+                    rear_box_inner_2d();
+            para_shell(
+                rear_front_t, honeycomb_back + rear_box_depth + 82,
+                max(rear_r_hub() - 32, hub_radius - 6),
+                rear_rim_outer()
+            );
+        }
+        // Do not eat the hoop; honeycomb already stops inside this band.
+        para_shell(-1, rim_back_t + 1, dish_r - rim_width - 2, dish_r + 2);
+    }
+}
+
+module rear_rim_collar_void() {
+    z0 = back_pt(dish_r, rim_back_t)[1];
+    translate([0, 0, z0])
+        linear_extrude(rear_z_top() - z0 + 2)
+            difference() {
+                circle(r = rear_rim_outer() + 20, $fn = shell_fn);
+                circle(r = dish_r, $fn = shell_fn);
+            }
+}
+
+module rear_gasket_2d() {
+    difference() {
+        offset(delta = -(rear_hatch_inset - gasket_w / 2))
+            rear_box_2d();
+        offset(delta = -(rear_hatch_inset + gasket_w / 2))
+            rear_box_2d();
+    }
+}
+
+module rear_groove_2d() {
+    difference() {
+        offset(delta = -(rear_hatch_inset - groove_w / 2))
+            rear_box_2d();
+        offset(delta = -(rear_hatch_inset + groove_w / 2))
+            rear_box_2d();
+    }
+}
+
+module rear_box_bosses() {
+    h = lip_t + pilot_depth + 2;
+    for (p = rear_boss_xy())
+        translate([p[0], p[1], rear_z_lid()])
+            cylinder(h=h, r=post_r, $fn=32);
+}
+
+module rear_box_pilots() {
+    for (p = rear_boss_xy())
+        translate([p[0], p[1], rear_z_lid() - 0.05])
+            cylinder(h=pilot_depth + 0.1, d=pilot_d, $fn=24);
+}
+
+module pi_standoffs() {
+    for (sx = [-1, 1], sy = [-1, 1])
+        translate([
+            pi_cx() + sx * pi_hole_span_x / 2,
+            pi_cy() + sy * pi_hole_span_y / 2,
+            0
+        ])
+            difference() {
+                intersection() {
+                    translate([0, 0, pi_z_top()])
+                        cylinder(h=rear_z_top() - pi_z_top(), d=pi_standoff_d, $fn=24);
+                    para_shell(
+                        rear_front_t - 0.4,
+                        honeycomb_back + rear_box_depth + 80,
+                        max(rear_r_hub() - 30, hub_radius - 4),
+                        rear_rim_outer()
+                    );
+                }
+                translate([0, 0, pi_z_top() - 0.05])
+                    cylinder(h=pi_standoff_h + 0.05, d=pi_pilot_d, $fn=20);
+            }
+}
+
+module rear_box_body() {
+    difference() {
+        union() {
+            difference() {
+                difference() {
+                    intersection() {
+                        translate([0, 0, rear_z_lid()])
+                            linear_extrude(rear_z_top() - rear_z_lid())
+                                rear_box_2d();
+                        // t-clip only; r1 is past the cylinder so the rim wall stays square to the lid.
+                        // t = 0 is the mesh inner face, so the box front is flush with the skin.
+                        para_shell(
+                            0, honeycomb_back + rear_box_depth + 80,
+                            max(rear_r_hub() - 40, 8),
+                            rear_rim_outer() + 8
+                        );
+                    }
+                    rear_rim_collar_void();
+                }
+                rear_box_cavity();
+                translate([0, 0, rear_z_lid() - 1])
+                    linear_extrude(lip_t + 2)
+                        rear_hatch_2d();
+            }
+            rear_box_bosses();
+            pi_standoffs();
+        }
+        rear_box_pilots();
+    }
+}
+
+module rear_lid() {
+    difference() {
+        linear_extrude(lid_t)
+            rear_box_2d();
+        translate([0, 0, -0.05])
+            linear_extrude(groove_d + 0.05)
+                rear_groove_2d();
+        for (p = rear_boss_xy()) {
+            translate([p[0], p[1], -0.2])
+                cylinder(h=lid_t + 0.4, d=hole_d, $fn=24);
+            translate([p[0], p[1], lid_t - csk_h])
+                cylinder(h=csk_h + 0.02, d1=hole_d, d2=csk_d, $fn=32);
+        }
+    }
+}
+
+module rear_gasket() {
+    linear_extrude(gasket_h)
+        rear_gasket_2d();
+}
+
+module place_rear_lid() {
+    translate([0, 0, rear_z_lid()])
+        mirror([0, 0, 1])
+            rear_lid();
+}
+
+module place_rear_gasket() {
+    translate([0, 0, rear_z_lid()])
+        mirror([0, 0, 1])
+            rear_gasket();
 }
 
 module place_front_lid() {
@@ -671,18 +937,29 @@ module quadrant_raw(q) {
     th = arm_theta(q);
     difference() {
         union() {
-            intersection() {
-                quadrant_region(q);
+            difference() {
                 union() {
-                    dish_body();
-                    enclosure_world();
+                    intersection() {
+                        quadrant_region(q);
+                        union() {
+                            dish_body();
+                            enclosure_world();
+                        }
+                    }
+                    intersection() {
+                        quadrant_region(q);
+                        arm_solid(th);
+                    }
+                    quadrant_seams(q);
                 }
+                if (rear_box)
+                    rear_box_cavity();
             }
-            intersection() {
-                quadrant_region(q);
-                arm_solid(th);
-            }
-            quadrant_seams(q);
+            if (rear_box)
+                intersection() {
+                    quadrant_region(q);
+                    rear_box_body();
+                }
         }
         hub_bolt_holes();
         bed_slot(q);
@@ -758,12 +1035,20 @@ module pole_bracket_print() {
 module assembly() {
     difference() {
         union() {
-            dish_body();
-            enclosure_world();
-            for (q = [0:3]) {
-                arm_solid(arm_theta(q));
-                quadrant_seams(q);
+            difference() {
+                union() {
+                    dish_body();
+                    for (q = [0:3]) {
+                        arm_solid(arm_theta(q));
+                        quadrant_seams(q);
+                    }
+                }
+                if (rear_box)
+                    rear_box_cavity();
             }
+            enclosure_world();
+            if (rear_box)
+                rear_box_body();
         }
         feed_void();
         key_void();
@@ -776,6 +1061,10 @@ module assembly() {
     place_gasket(-1);
     place_gasket(1);
     pole_bracket();
+    if (rear_box) {
+        place_rear_lid();
+        place_rear_gasket();
+    }
 }
 
 function active_q() =
@@ -803,4 +1092,6 @@ else if (part == "front_lid") lid(true);
 else if (part == "back_lid") lid(false);
 else if (part == "gasket") gasket();
 else if (part == "pole_bracket") pole_bracket_print();
+else if (part == "rear_lid") rear_lid();
+else if (part == "rear_gasket") rear_gasket();
 else assert(false, str("Unknown part ", part));
