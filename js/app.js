@@ -15,6 +15,7 @@ const state = {
   resetKey: 0,
   edited: false,
   codeOpen: false,
+  libraryOpen: false,
 };
 
 let worker = null;
@@ -26,6 +27,8 @@ const els = {
   openTop: document.getElementById("open-file-top"),
   openShelf: document.getElementById("open-file-shelf"),
   fileInput: document.getElementById("file-input"),
+  workspace: document.querySelector(".workspace"),
+  libraryToggle: document.getElementById("library-toggle"),
   modelCount: document.getElementById("model-count"),
   modelList: document.getElementById("model-list"),
   filePill: document.getElementById("file-pill"),
@@ -270,6 +273,8 @@ function fileLabel() {
 }
 
 function sync({ skipParameters = false } = {}) {
+  els.workspace.classList.toggle("library-open", state.libraryOpen);
+  els.libraryToggle.setAttribute("aria-expanded", String(state.libraryOpen));
   els.filePill.textContent = state.active < 0 ? "LOCAL FILE" : "LIBRARY FILE";
   els.fileName.textContent = fileLabel();
   els.editDot.hidden = !state.edited;
@@ -430,6 +435,10 @@ els.openShelf.addEventListener("click", pickFile);
 els.fileInput.addEventListener("change", (e) => {
   void openLocal(e.target.files?.[0]);
   e.target.value = "";
+});
+els.libraryToggle.addEventListener("click", () => {
+  state.libraryOpen = !state.libraryOpen;
+  sync();
 });
 els.codeToggle.addEventListener("click", () => {
   state.codeOpen = !state.codeOpen;
