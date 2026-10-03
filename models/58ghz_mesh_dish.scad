@@ -44,18 +44,24 @@ print_yaw = 0; // [0:1:90]
 
 /* [Feed enclosure] */
 enclosure_size = 50; // [36:1:80]
+// Depth of the box along +Z. The dish-facing opening stays at the focus.
+enclosure_height = 50; // [24:1:120]
 enclosure_wall = 2; // [1.6:0.1:4]
-arm_width = 14; // [12:0.5:24]
-arm_height = 6; // [4:0.5:12]
-feed_bore_width = 8; // [4:0.5:14]
-feed_bore_height = 3; // [2:0.5:8]
+arm_width = 20; // [16:0.5:36]
+arm_height = 20; // [16:0.5:36]
+feed_bore_width = 14; // [12:0.1:24]
+feed_bore_height = 14; // [12:0.1:24]
 radome_thickness = 1.2; // [0.8:0.1:2.5]
 
 /* [Pole bracket] */
 pole_diameter = 32; // [20:0.5:60]
 pole_clearance = 0.8; // [0.2:0.1:2]
+// Included angle of the pole V. 90° is the 45° stair faces. Larger is a wider V.
+v_included = 90; // [60:1:130]
 clamp_band_width = 12.7; // [8:0.1:20]
 clamp_slot = 2.5; // [1.5:0.1:4]
+// Distance between the two hose-clamp stations along the pole, not the V width.
+clamp_pitch = 72; // [50:1:140]
 bolt_d = 5; // [3:0.1:8]
 bolt_circle_r = 28; // [16:1:40]
 
@@ -90,31 +96,34 @@ gasket_h = 1.4;
 lid_t = 3.2;
 lip_t = 3;
 honey_back = skin_thickness + honey_depth;
+rim_back_t = max(rim_depth, honey_back) + 0.5;
+rim_xy = dish_r + (rim_back_t + 0.5) * sin(rim_slope_deg);
 // Solid fill inside the honeycomb. The cut is one face of an arm. The upright
 // strip is the extra past that face; the bed strip matches it on the far side.
 upright_band = 4;
 // Square plug is a hair under the hub gap so the quadrants close around it.
 plug_fit = 0.4;
 flange_t = 8;
-clamp_pitch = 72;
 cheek_y = clamp_band_width + 6;
 pole_r = pole_diameter / 2 + pole_clearance;
 flange_back = -hub_thickness - flange_t;
-// 45° V opening away from the dish. Stair corners lie on the two faces.
-// The third corner on each face is where the pole is tangent.
-contact = pole_r / sqrt(2);
-stair = contact / 3;
+v_angle = v_included / 2;
 v_steps = 6;
 v_wall = 4;
-// Stairs begin on the underside of the flange. A web here left a thin
-// rectangle across each clamp station.
+// Stairs begin on the underside of the flange. Corners lie on the two faces.
+// Depth runs to the pole center so the hose clamp can wrap the tube.
 z_apex = flange_back;
-pole_cz = z_apex - pole_r * sqrt(2);
+v_depth = pole_r / sin(v_angle);
+stair_x = v_depth * tan(v_angle) / v_steps;
+stair_z = v_depth / v_steps;
+pole_cz = z_apex - v_depth;
 cheek_back = pole_cz;
-v_half = v_steps * stair;
+v_half = v_steps * stair_x;
+min_clamp_pitch = 2 * (bolt_circle_r * sin(45) + bolt_d / 2 + 1) + cheek_y;
+station_pitch = max(clamp_pitch, min_clamp_pitch);
 // Rectangular plate. Its corners are the outer corners of the two clamp stations.
 flange_hx = v_half + v_wall;
-flange_hy = clamp_pitch / 2 + cheek_y / 2;
+flange_hy = station_pitch / 2 + cheek_y / 2;
 plug_side = arm_width - plug_fit;
 
 echo(lambda_mm=lambda_mm, surface_opening_mm=surface_opening, rim_slope_deg=rim_slope_deg);
@@ -124,14 +133,16 @@ echo(dish_depth_mm=dish_depth);
 assert(xy_opening > 0.8, "Mesh opening is too small to print");
 assert(mesh_rib >= 0.8, "Mesh rib is too thin to print");
 assert(enclosure_size >= 36, "Enclosure is too small for the corner posts");
-assert(feed_bore_width < arm_width - 2 && feed_bore_height < arm_height - 1, "Feed bore does not fit in the arm");
+assert(enclosure_height >= 2 * (lip_t + 4), "Enclosure is too short for the lid lands");
+assert(arm_width - feed_bore_width >= 4 && arm_height - feed_bore_height >= 4, "Feed bore does not leave a wall in the arm");
 assert(gasket_half - groove_w / 2 > inner_opening / 2, "Gasket leaves the land");
 assert((enclosure_size / 2) * sqrt(2) + arm_width < dish_r - rim_width, "Enclosure corner reaches the rim");
 assert(bolt_circle_r * cos(45) + bolt_d / 2 < flange_hx - 2, "Bolt holes leave the flange");
 assert(bolt_circle_r * sin(45) + bolt_d / 2 < flange_hy - 2, "Bolt holes leave the flange");
 assert(bolt_circle_r - bolt_d / 2 > (arm_width / 2) * sqrt(2) + 1, "Bolt holes meet the hub gap");
-assert(clamp_pitch / 2 - cheek_y / 2 > bolt_circle_r * sin(45) + bolt_d / 2 + 1, "Clamp cheek covers a bolt hole");
 assert(plug_side > 4, "Hub plug is too small");
+if (clamp_pitch < min_clamp_pitch)
+    echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
 
 function z_of(r) = r * r / (4 * focal_length);
 function ang_of(r) = atan(r / (2 * focal_length));
@@ -150,28 +161,32 @@ function vmax(v, i = 0) = i + 1 >= len(v) ? v[i] : max(v[i], vmax(v, i + 1));
 
 function arm_theta(q) = q * 90;
 function rim_pt(th) = let(r = dish_r - rim_width / 2) [r * cos(th), r * sin(th), z_of(r)];
-function focus_pt(th) = let(r = enclosure_size / 2 * sqrt(2)) [r * cos(th), r * sin(th), focal_length];
-function outer_pt(th) = let(r = enclosure_size / 2 * sqrt(2)) [r * cos(th), r * sin(th), focal_length + enclosure_size / 2];
+function rim_outer(th) = [dish_r * cos(th), dish_r * sin(th), z_of(dish_r)];
+function focus_pt(th) = let(r = enclosure_size / 2) [r * cos(th), r * sin(th), focal_length];
+function outer_pt(th) = let(r = enclosure_size / 2) [r * cos(th), r * sin(th), focal_length + enclosure_height];
 
-function arm_u(th) = unit(vsub(focus_pt(th), rim_pt(th)));
+function arm_radial(th) = [cos(th), sin(th), 0];
 function arm_az(th) = [-sin(th), cos(th), 0];
-function arm_out(th) =
-    let(
-        u = arm_u(th),
-        az = arm_az(th),
-        n = unit(cross(az, u)),
-        w = [0, 0, enclosure_size / 2]
-    ) (dot(n, w) >= 0 ? n : vmul(n, -1));
 
-function face_dist(th) = dot([0, 0, enclosure_size / 2], arm_out(th));
-function arm_len(th) = vnorm(vsub(focus_pt(th), rim_pt(th)));
+function arm_encl(th) = [focus_pt(th)[0], focus_pt(th)[1], focal_length + arm_height / 2];
+// Chord of the rim circle: the arm's outer vertical edges sit on r = dish_r.
+// Centerline is inboard so the 20 mm section is not centered on the hoop.
+function arm_rim_r() = sqrt(max(dish_r * dish_r - (arm_width / 2) * (arm_width / 2), 0));
+function arm_rim(th) =
+    let(r = arm_rim_r())
+    [r * cos(th), r * sin(th), z_of(dish_r) - arm_height / 2];
+function arm_u(th) = unit(vsub(arm_encl(th), arm_rim(th)));
+function arm_len(th) = vnorm(vsub(arm_encl(th), arm_rim(th)));
+function arm_mid(th, extra_encl = 4, extra_rim = 0) =
+    vadd(arm_rim(th), vmul(arm_u(th), (arm_len(th) + extra_encl - extra_rim) / 2));
 
 echo(arm_angle_deg=atan2(
-    focus_pt(270)[2] - rim_pt(270)[2],
-    dish_r - rim_width / 2 - enclosure_size / 2 * sqrt(2)
+    arm_encl(270)[2] - arm_rim(270)[2],
+    dish_r - enclosure_size / 2
 ));
 assert(arm_len(270) > 20, "Hollow arm is too short");
-assert(arm_width / 2 >= post_r + 1, "Arm is too narrow for the seam to clear the corner post");
+assert(enclosure_size > arm_width + 4, "Arm is wider than the enclosure face");
+assert(enclosure_height >= arm_height, "Enclosure is shorter than the arm");
 
 // The bed is one side face of the arm. Material is on the +up side of that plane.
 function bed_up(q) =
@@ -194,18 +209,22 @@ function prism_corners(q) =
         th = arm_theta(q),
         u = arm_u(th),
         az = arm_az(th),
-        outn = arm_out(th),
-        len = arm_len(th),
-        mid = vadd(rim_pt(th), vadd(vmul(u, len / 2), vmul(outn, face_dist(th) - arm_height / 2)))
+        extra_rim = 2,
+        len = arm_len(th) + 4 + extra_rim,
+        mid = arm_mid(th, 4, extra_rim)
     )
-    [for (su = [-1, 1], saz = [-1, 1], so = [-1, 1])
+    [for (su = [-1, 1], saz = [-1, 1], sz = [-1, 1])
         vadd(mid, vadd(
-            vmul(u, su * (len + 6) / 2),
-            vadd(vmul(az, saz * arm_width / 2), vmul(outn, so * arm_height / 2))
+            vmul(u, su * len / 2),
+            vadd(vmul(az, saz * arm_width / 2), [0, 0, sz * arm_height / 2])
         ))];
 
 function region_samples(q) =
-    let(a = arm_width / 2, s = sqrt(max(dish_r * dish_r - a * a, 0)), d = dish_r * 0.7071)
+    let(
+        a = arm_width / 2,
+        s = sqrt(max(rim_xy * rim_xy - a * a, 0)),
+        d = rim_xy * 0.7071
+    )
     q == 0 ? [[a, -a], [s, -a], [a, s], [d, d]] :
     q == 1 ? [[a, a], [-s, a], [a, s], [-d, d]] :
     q == 2 ? [[-a, a], [-s, a], [-a, -s], [-d, -d]] :
@@ -214,9 +233,9 @@ function region_samples(q) =
 function quad_samples(q) =
     let(th = arm_theta(q))
     concat(
-        [for (xy = region_samples(q), z = [-hub_thickness, focal_length + enclosure_size / 2])
+        [for (xy = region_samples(q), z = [-hub_thickness, focal_length + enclosure_height])
             [xy[0], xy[1], z]],
-        [rim_pt(th), focus_pt(th), outer_pt(th)],
+        [rim_outer(th), focus_pt(th), outer_pt(th)],
         prism_corners(q)
     );
 
@@ -275,7 +294,7 @@ module hub_weld() {
 
 module rim_hoop() {
     // Proud of the mesh by 0.3 mm so the shared band is interior, not a coplanar face.
-    para_shell(-0.3, max(rim_depth, honey_back) + 0.5, dish_r - rim_width, dish_r);
+    para_shell(-0.3, rim_back_t, dish_r - rim_width, dish_r);
 }
 
 module hub_pad() {
@@ -296,11 +315,13 @@ module dish_body() {
 
 // Two straight cuts, each coplanar with an arm side. They bound a square of
 // side arm_width at the hub instead of meeting on the axis.
+// The rim's back face sits outside dish_r by t*sin(slope), and the cube is
+// offset by a, so dish_r+8 left a flat chord on the far arc.
 module quadrant_region(q) {
     a = arm_width / 2;
-    span = dish_r + 8;
+    span = rim_xy + a + 4;
     z0 = -hub_thickness - 8;
-    z1 = focal_length + enclosure_size + 4;
+    z1 = focal_length + enclosure_height + 4;
     h = z1 - z0;
     if (q == 0) translate([a, -a, z0]) cube([span, span, h]);
     else if (q == 1) translate([a - span, a, z0]) cube([span, span, h]);
@@ -319,70 +340,62 @@ module frame_cube(origin, ux, uy, uz, size) {
             cube(size);
 }
 
-module arm_prism(th) {
-    u = arm_u(th);
-    ay = vmul(arm_az(th), -1);
-    outn = arm_out(th);
-    dist = face_dist(th);
-    len = arm_len(th);
-    mid = vadd(rim_pt(th), vadd(vmul(u, len / 2), vmul(outn, dist - arm_height / 2)));
-    // (u, az, outn) is left-handed, so the width axis is flipped to keep a positive volume.
-    frame_cube(mid, u, ay, outn, [len + 6, arm_width, arm_height]);
+module arm_clip(th) {
+    overlap = 1.2;
+    s = enclosure_size / 2 - overlap;
+    if (th == 0)
+        translate([s, -500, -200]) cube([1000, 1000, 1000]);
+    else if (th == 90)
+        translate([-500, s, -200]) cube([1000, 1000, 1000]);
+    else if (th == 180)
+        translate([-s - 1000, -500, -200]) cube([1000, 1000, 1000]);
+    else
+        translate([-500, -s - 1000, -200]) cube([1000, 1000, 1000]);
 }
 
-module arm_foot(th) {
+module arm_blank(th, w, h, extra_encl, extra_rim) {
     u = arm_u(th);
-    ay = vmul(arm_az(th), -1);
-    outn = arm_out(th);
-    along = face_dist(th) - arm_height / 2;
-    // The prism sits on the outer plane. These roots bury that prism in the hoop and the corner post.
-    hull() {
-        frame_cube(vadd(rim_pt(th), vmul(outn, along)), u, ay, outn, [14, arm_width, arm_height]);
-        translate(rim_pt(th))
-            cube([28, 28, 32], center=true);
-    }
-    hull() {
-        frame_cube(
-            vadd(focus_pt(th), vadd(vmul(u, -8), vmul(outn, along))),
-            u, ay, outn,
-            [14, arm_width, arm_height]
-        );
-        translate(focus_pt(th)) cube(12, center=true);
-        // The outer corner lies on the print face. Shift this root inward so it
-        // cannot cross that face; an 8 mm cube centered on the corner would.
-        translate(vadd(outer_pt(th), vmul(outn, -(4 * (abs(outn[0]) + abs(outn[1]) + abs(outn[2])) + 0.2))))
-            cube(8, center=true);
+    dist = arm_len(th);
+    frame_cube(
+        arm_mid(th, extra_encl, extra_rim),
+        u, arm_az(th), [0, 0, 1],
+        [dist + extra_encl + extra_rim, w, h]
+    );
+}
+
+module arm_rim_clip() {
+    translate([0, 0, -500])
+        cylinder(h=1000, r=dish_r, $fn=shell_fn);
+}
+
+// Volume behind the rim/honeycomb back. The arm may not occupy this.
+module behind_dish_back() {
+    para_shell(rim_back_t, rim_back_t + 80, dish_r - rim_width - 12, dish_r + 8);
+}
+
+module arm_prism(th) {
+    difference() {
+        intersection() {
+            arm_blank(th, arm_width, arm_height, 4, 2);
+            arm_clip(th);
+            arm_rim_clip();
+        }
+        behind_dish_back();
     }
 }
 
 module arm_solid(th) {
     arm_prism(th);
-    arm_foot(th);
 }
 
-// Bore through the hollow arm. The mouth is the rim end, which is the low
-// end when the dish is installed. The enclosure end stops short of the
-// corner post and turns through the side wall into the cavity.
+// Conduit through the quadrant-4 arm. Same section as the arm, open into the
+// enclosure and out the back of the rim past the mesh.
 module feed_void() {
-    th = 270;
-    u = arm_u(th);
-    ay = vmul(arm_az(th), -1);
-    outn = arm_out(th);
-    dist = face_dist(th);
-    len = arm_len(th);
-    along = dist - arm_height / 2;
-    // Center the bore toward the rim so it stays clear of the screw post.
-    mid = vadd(rim_pt(th), vadd(vmul(u, len / 2 - 12), vmul(outn, along)));
-    frame_cube(mid, u, ay, outn, [len + 8, feed_bore_width, feed_bore_height]);
-    hull() {
-        frame_cube(
-            vadd(rim_pt(th), vadd(vmul(u, len - 22), vmul(outn, along))),
-            u, ay, outn,
-            [8, feed_bore_width, feed_bore_height]
-        );
-        translate(rot_z(45, [-10, -10, focal_length]))
-            cube([feed_bore_width, feed_bore_width, feed_bore_height], center=true);
-    }
+    extra_rim = rim_width + honey_back + 20;
+    arm_blank(
+        270, feed_bore_width, feed_bore_height,
+        enclosure_wall + 10, extra_rim
+    );
 }
 
 module rounded_square(half, rad) {
@@ -406,18 +419,18 @@ module groove_2d() {
 module corner_posts() {
     for (sx = [-1, 1], sy = [-1, 1])
         translate([sx * enclosure_size / 2, sy * enclosure_size / 2, 0])
-            cylinder(h=enclosure_size, r=post_r, center=true, $fn=32);
+            cylinder(h=enclosure_height, r=post_r, center=true, $fn=32);
 }
 
 module enclosure_local() {
     difference() {
         union() {
             difference() {
-                cube([enclosure_size, enclosure_size, enclosure_size], center=true);
-                cube([enclosure_size - 2 * enclosure_wall, enclosure_size - 2 * enclosure_wall, enclosure_size + 2], center=true);
+                cube([enclosure_size, enclosure_size, enclosure_height], center=true);
+                cube([enclosure_size - 2 * enclosure_wall, enclosure_size - 2 * enclosure_wall, enclosure_height + 2], center=true);
             }
             for (s = [-1, 1])
-                translate([0, 0, s * (enclosure_size / 2 - lip_t / 2)])
+                translate([0, 0, s * (enclosure_height / 2 - lip_t / 2)])
                     difference() {
                         cube([enclosure_size, enclosure_size, lip_t], center=true);
                         cube([inner_opening, inner_opening, lip_t + 2], center=true);
@@ -430,16 +443,15 @@ module enclosure_local() {
 
 module pilots() {
     for (sx = [-1, 1], sy = [-1, 1], s = [-1, 1]) {
-        z0 = s > 0 ? enclosure_size / 2 - pilot_depth : -enclosure_size / 2 - 0.05;
+        z0 = s > 0 ? enclosure_height / 2 - pilot_depth : -enclosure_height / 2 - 0.05;
         translate([sx * enclosure_size / 2, sy * enclosure_size / 2, z0])
             cylinder(h=pilot_depth + 0.1, d=pilot_d, $fn=24);
     }
 }
 
 module enclosure_world() {
-    translate([0, 0, focal_length])
-        rotate([0, 0, 45])
-            enclosure_local();
+    translate([0, 0, focal_length + enclosure_height / 2])
+        enclosure_local();
 }
 
 module lid_holes() {
@@ -478,27 +490,22 @@ module gasket() {
 
 module place_front_lid() {
     translate([0, 0, focal_length])
-        rotate([0, 0, 45])
-            translate([0, 0, -enclosure_size / 2])
-                mirror([0, 0, 1])
-                    lid(true);
+        mirror([0, 0, 1])
+            lid(true);
 }
 
 module place_back_lid() {
-    translate([0, 0, focal_length])
-        rotate([0, 0, 45])
-            translate([0, 0, enclosure_size / 2])
-                lid(false);
+    translate([0, 0, focal_length + enclosure_height])
+        lid(false);
 }
 
 module place_gasket(s) {
     // s = -1 front, +1 back. The gasket sits on the land and stands proud toward the lid.
-    translate([0, 0, focal_length + s * enclosure_size / 2])
-        rotate([0, 0, 45])
-            if (s > 0)
-                gasket();
-            else
-                mirror([0, 0, 1]) gasket();
+    translate([0, 0, focal_length + (s > 0 ? enclosure_height : 0)])
+        if (s > 0)
+            gasket();
+        else
+            mirror([0, 0, 1]) gasket();
 }
 
 // The bed edge is the arm-side plane that sits on the printer. The other edge
@@ -542,16 +549,18 @@ module edge_slab(q, bed, d0, d1) {
         [0, 0, 0, 1]
     ])
         translate([d0, 0, 0])
-            cube([d1 - d0, dish_r, dish_depth + hub_thickness + 40]);
+            cube([d1 - d0, rim_xy + arm_width / 2 + 4, dish_depth + hub_thickness + 40]);
 }
 
 // Fill the honeycomb along one cut. The band is the cell depth, not a shelf
 // behind it. The bed edge stays on the print plane, crosses the arm, and
 // continues upright_band past the far face. The upright edge is that same
 // distance past the cut, plus 0.2 mm of overlap so the quadrants share volume.
+// The strip runs through the inner rim so it meets the hoop; dish_r from the
+// offset corner stopped short of the far arc.
 module edge_binding(q, bed) {
     intersection() {
-        para_shell(0.5, honey_back, hub_radius - 2, dish_r - rim_width + 1);
+        para_shell(0.5, honey_back, hub_radius - 2, dish_r - 1);
         if (bed)
             edge_slab(q, true, 0, arm_width + upright_band);
         else
@@ -626,13 +635,13 @@ module quadrant_print(q) {
 module clamp_station(station_y) {
     outer = v_half + v_wall;
     for (i = [0:v_steps - 1]) {
-        z_top = z_apex - i * stair;
-        inner = (i + 1) * stair;
+        z_top = z_apex - i * stair_z;
+        inner = (i + 1) * stair_x;
         extra = i == 0 ? 0.2 : 0;
-        translate([-outer, station_y - cheek_y / 2, z_top - stair])
-            cube([outer - inner, cheek_y, stair + extra]);
-        translate([inner, station_y - cheek_y / 2, z_top - stair])
-            cube([outer - inner, cheek_y, stair + extra]);
+        translate([-outer, station_y - cheek_y / 2, z_top - stair_z])
+            cube([outer - inner, cheek_y, stair_z + extra]);
+        translate([inner, station_y - cheek_y / 2, z_top - stair_z])
+            cube([outer - inner, cheek_y, stair_z + extra]);
     }
 }
 
@@ -648,13 +657,13 @@ module pole_bracket() {
             translate([-flange_hx, -flange_hy, flange_back])
                 cube([2 * flange_hx, 2 * flange_hy, flange_t]);
             for (s = [-1, 1])
-                clamp_station(s * clamp_pitch / 2);
+                clamp_station(s * station_pitch / 2);
         }
         // Opens on the underside of the flange and clears the first step, so no
         // thin plate is left across the station.
-        slot_h = max(clamp_slot, stair) + 0.2;
+        slot_h = max(clamp_slot, stair_z) + 0.2;
         for (s = [-1, 1])
-            translate([0, s * clamp_pitch / 2, flange_back - (slot_h - 0.2) / 2])
+            translate([0, s * station_pitch / 2, flange_back - (slot_h - 0.2) / 2])
                 cube([2 * (v_half + v_wall) + 4, clamp_band_width + 1, slot_h], center=true);
         for (i = [0:3]) {
             p = bolt_xy(i);
