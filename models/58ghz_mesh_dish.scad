@@ -28,26 +28,26 @@ fast_preview = false;
 frequency_GHz = 5.8; // [5:0.1:6.5]
 dish_diameter = 400; // [250:1:600]
 focal_length = 150; // [80:1:300]
-mesh_opening_lambda = 0.1; // [0.05:0.01:0.2]
-mesh_rib = 1.2; // [0.8:0.1:2.5]
-skin_thickness = 1.2; // [0.8:0.1:2.5]
+mesh_opening_lambda = 0.05; // [0.05:0.01:0.2]
+mesh_rib = 0.8; // [0.8:0.1:2.5]
+skin_thickness = 0.8; // [0.8:0.1:2.5]
 
 /* [Structure] */
-honey_pitch = 24; // [12:1:40]
-honey_rib = 2.4; // [1.2:0.1:4]
-honey_depth = 10; // [6:1:18]
-hub_radius = 45; // [30:1:70]
+honeycomb_pitch = 60; // [12:1:60]
+honeycomb_rib = 1.2; // [1.2:0.1:4]
+honeycomb_depth = 10; // [6:1:18]
+hub_radius = 30; // [30:1:70]
 hub_thickness = 12; // [8:1:20]
-rim_width = 8; // [4:1:16]
+rim_width = 4; // [2:1:16]
 rim_depth = 8; // [4:1:16]
 printer_bed_mm = 256; // [180:1:400]
 print_yaw = 0; // [0:1:90]
 
 /* [Seam spline] */
 // Tongue height past the upright cut.
-spline_h = 1.8; // [0.8:0.1:4]
+spline_h = 16; // [0.8:0.1:16]
 // Tongue thickness, centered in the honeycomb fill.
-spline_t = 3.2; // [1.6:0.1:8]
+spline_t = 2; // [1.6:0.1:8]
 // Extra slot width on each side of the tongue thickness.
 spline_clear_t = 0.3; // [0.05:0.05:1]
 // Extra slot depth past the tongue height.
@@ -56,28 +56,36 @@ spline_clear_h = 0.3; // [0.05:0.05:1]
 /* [Feed enclosure] */
 enclosure_size = 50; // [36:1:80]
 // Depth of the box along +Z. The dish-facing opening stays at the focus.
-enclosure_height = 50; // [24:1:120]
+enclosure_height = 24; // [9:1:120]
 enclosure_wall = 2; // [1.6:0.1:4]
 arm_width = 20; // [16:0.5:36]
 arm_height = 20; // [16:0.5:36]
-feed_bore_width = 14; // [12:0.1:24]
-feed_bore_height = 14; // [12:0.1:24]
-radome_thickness = 1.2; // [0.8:0.1:2.5]
+arm_wall = 2; // [2:2:4]
+radome_thickness = 0.8; // [0.8:0.1:2.5]
 
 /* [Pole bracket] */
 pole_diameter = 32; // [20:0.5:60]
 pole_clearance = 0.8; // [0.2:0.1:2]
 // Included angle of the pole V. 90° is the 45° stair faces. Larger is a wider V.
-v_included = 90; // [60:1:130]
+v_included = 120; // [60:1:130]
 clamp_band_width = 12.7; // [8:0.1:20]
 clamp_slot = 2.5; // [1.5:0.1:4]
 // Distance between the two hose-clamp stations along the pole, not the V width.
 clamp_pitch = 72; // [50:1:140]
 bolt_d = 5; // [3:0.1:8]
 bolt_circle_r = 28; // [16:1:40]
+// Head seat on the dish inner face.
+hub_bolt_recess = "round"; // [none:None, round:Round, hex:Hex]
+// Diameter for round, across-flats for hex.
+hub_bolt_recess_size = 9; // [5:0.1:16]
+// Minimum depth below the inner face, on the shallow side of the angle.
+hub_bolt_recess_h = 3.2; // [0:0.1:8]
 
 /* [Hidden] */
 $fn = 64;
+
+feed_bore_height = arm_height - 2 * arm_wall;
+feed_bore_width = arm_width - 2 * arm_wall;
 
 lambda_mm = 299.792458 / frequency_GHz;
 surface_opening = mesh_opening_lambda * lambda_mm;
@@ -106,8 +114,8 @@ gasket_w = 1.6;
 gasket_h = 1.4;
 lid_t = 3.2;
 lip_t = 3;
-honey_back = skin_thickness + honey_depth;
-rim_back_t = max(rim_depth, honey_back) + 0.5;
+honeycomb_back = skin_thickness + honeycomb_depth;
+rim_back_t = max(rim_depth, honeycomb_back) + 0.5;
 rim_xy = dish_r + (rim_back_t + 0.5) * sin(rim_slope_deg);
 // Solid fill inside the honeycomb. The cut is one face of an arm. The upright
 // strip is the extra past that face; the bed strip matches it on the far side.
@@ -146,14 +154,16 @@ assert(xy_opening > 0.8, "Mesh opening is too small to print");
 assert(mesh_rib >= 0.8, "Mesh rib is too thin to print");
 assert(enclosure_size >= 36, "Enclosure is too small for the corner posts");
 assert(enclosure_height >= 2 * (lip_t + 4), "Enclosure is too short for the lid lands");
-assert(arm_width - feed_bore_width >= 4 && arm_height - feed_bore_height >= 4, "Feed bore does not leave a wall in the arm");
+assert(arm_wall >= 2 && feed_bore_width > 0 && feed_bore_height > 0, "Feed bore does not leave a wall in the arm");
 assert(gasket_half - groove_w / 2 > inner_opening / 2, "Gasket leaves the land");
 assert((enclosure_size / 2) * sqrt(2) + arm_width < dish_r - rim_width, "Enclosure corner reaches the rim");
 assert(bolt_circle_r * cos(45) + bolt_d / 2 < flange_hx - 2, "Bolt holes leave the flange");
 assert(bolt_circle_r * sin(45) + bolt_d / 2 < flange_hy - 2, "Bolt holes leave the flange");
 assert(bolt_circle_r - bolt_d / 2 > (arm_width / 2) * sqrt(2) + 1, "Bolt holes meet the hub gap");
+assert(hub_bolt_recess == "none" || hub_bolt_recess_h <= 0 || hub_bolt_recess_size > bolt_d, "Bolt recess is smaller than the shank");
+assert(hub_bolt_recess == "none" || hub_bolt_recess_h <= 0 || hub_bolt_recess_h < hub_thickness - 2, "Bolt recess goes through the hub");
 assert(plug_side > 4, "Hub plug is too small");
-assert(spline_t + 2 * spline_clear_t < honey_back, "Spline is thicker than the honeycomb fill");
+assert(spline_t + 2 * spline_clear_t < honeycomb_back, "Spline is thicker than the honeycomb fill");
 assert(spline_h + spline_clear_h < arm_width, "Spline slot cuts through the arm");
 assert(spline_embed < upright_band, "Spline root leaves the upright strip");
 if (clamp_pitch < min_clamp_pitch)
@@ -292,14 +302,14 @@ module mesh_skin() {
 module honeycomb() {
     difference() {
         // Starts inside the skin and ends inside the rim, so no shared face.
-        para_shell(0.5, honey_back, hub_radius - 2, dish_r - rim_width + 1);
-        hex_grid(honey_pitch, honey_rib, dish_r);
+        para_shell(0.5, honeycomb_back, hub_radius - 2, dish_r - rim_width + 1);
+        hex_grid(honeycomb_pitch, honeycomb_rib, dish_r);
     }
 }
 
 // Solid band over the hub edge, behind the front surface. Mesh ribs end here.
 module hub_weld() {
-    para_shell(0.5, honey_back + 1, hub_radius - 8, hub_radius + 4);
+    para_shell(0.5, honeycomb_back + 1, hub_radius - 8, hub_radius + 4);
 }
 
 module rim_hoop() {
@@ -398,14 +408,26 @@ module arm_solid(th) {
     arm_prism(th);
 }
 
-// Conduit through the quadrant-4 arm. Same section as the arm, open into the
-// enclosure and out the back of the rim past the mesh.
+// Conduit through the quadrant-4 arm. Same section as the arm. The arm-axis
+// cut stops at the rim so it does not nick the sloped outer face. A second
+// cut along the rim normal opens the back of the hoop and leaves arm_wall of
+// that outer face. That cut stops at the dish inner face so its top cannot
+// notch the arm's outer wall.
 module feed_void() {
-    extra_rim = rim_width + honey_back + 20;
-    arm_blank(
-        270, feed_bore_width, feed_bore_height,
-        enclosure_wall + 10, extra_rim
-    );
+    th = 270;
+    a = ang_of(dish_r);
+    rad = arm_radial(th);
+    n_back = [rad[0] * sin(a), rad[1] * sin(a), -cos(a)];
+    through = rim_back_t + arm_height / 2 + 4;
+    arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 0);
+    intersection() {
+        frame_cube(
+            vadd(arm_rim(th), vmul(n_back, through / 2)),
+            n_back, arm_az(th), [0, 0, 1],
+            [through, feed_bore_width, feed_bore_height]
+        );
+        para_shell(0, rim_back_t + arm_height + 20, dish_r - rim_width - 8, dish_r + 30);
+    }
 }
 
 module rounded_square(half, rad) {
@@ -570,7 +592,7 @@ module edge_slab(q, bed, d0, d1) {
 // meets the hoop; dish_r from the offset corner stopped short of the far arc.
 module edge_binding(q, bed) {
     intersection() {
-        para_shell(0, honey_back, hub_radius - 2, dish_r - 1);
+        para_shell(0, honeycomb_back, hub_radius - 2, dish_r - 1);
         if (bed)
             edge_slab(q, true, 0, arm_width + upright_band);
         else
@@ -578,7 +600,7 @@ module edge_binding(q, bed) {
     }
 }
 
-function spline_t_mid() = honey_back / 2;
+function spline_t_mid() = honeycomb_back / 2;
 function spline_r0() = hub_radius + 4;
 function spline_r1() = dish_r - rim_width - 2;
 
@@ -610,13 +632,32 @@ module quadrant_seams(q) {
 
 function bolt_xy(i) = let(a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
 
-// Plain through-holes, one in each quadrant. They run from the hub back face
-// out through the front face. Countersinks and threads come later.
+function hub_bolt_recess_d() =
+    hub_bolt_recess == "hex" ? hub_bolt_recess_size / cos(30) : hub_bolt_recess_size;
+
+// Pocket coaxial with the shank hole. The dish face is sloped, so the floor
+// is set from the inboard (shallow) edge so the whole head sits below the face.
+module hub_bolt_recess_at(p) {
+    rr = hub_bolt_recess_d() / 2;
+    z_top = z_of(bolt_circle_r + rr) + 1;
+    z_bot = z_of(max(bolt_circle_r - rr, 0)) - hub_bolt_recess_h;
+    translate([p[0], p[1], z_bot])
+        cylinder(
+            h=z_top - z_bot,
+            d=hub_bolt_recess_d(),
+            $fn=hub_bolt_recess == "hex" ? 6 : 48
+        );
+}
+
+// Through-holes, one in each quadrant, from the hub back through the front.
+// Optional round or hex seats for the heads on the inner face.
 module hub_bolt_holes() {
     for (i = [0:3]) {
         p = bolt_xy(i);
         translate([p[0], p[1], -hub_thickness - 2])
             cylinder(h=hub_thickness + 10, d=bolt_d, $fn=24);
+        if (hub_bolt_recess != "none" && hub_bolt_recess_h > 0)
+            hub_bolt_recess_at(p);
     }
 }
 

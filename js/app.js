@@ -73,6 +73,25 @@ function changeSource(next) {
   sync();
 }
 
+function caption(parameter) {
+  return parameter.description || parameter.label;
+}
+
+function numberInput(parameter, value, onCommit) {
+  const wrap = document.createElement("div");
+  wrap.className = "param-input-wrap";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = parameter.step === undefined ? "any" : String(parameter.step);
+  if (parameter.min !== undefined) input.min = String(parameter.min);
+  if (parameter.max !== undefined) input.max = String(parameter.max);
+  input.value = String(value);
+  input.addEventListener("blur", () => onCommit(input.value));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") e.currentTarget.blur(); });
+  wrap.appendChild(input);
+  return { wrap, input };
+}
+
 function commitParameter(parameter, draft) {
   if (parameter.kind === "text") {
     changeSource(setParameter(state.source, parameter, JSON.stringify(draft)));
@@ -87,16 +106,18 @@ function commitParameter(parameter, draft) {
 }
 
 function parameterRow(parameter) {
+  const title = caption(parameter);
   if (parameter.options?.length) {
     const row = document.createElement("div");
     row.className = "param-row param-select";
     const id = `param-${parameter.name}`;
     const label = document.createElement("label");
     label.htmlFor = id;
-    label.textContent = parameter.label;
+    label.textContent = title;
+    label.title = parameter.name;
     const select = document.createElement("select");
     select.id = id;
-    select.setAttribute("aria-label", parameter.label);
+    select.setAttribute("aria-label", title);
     for (const option of parameter.options) {
       const item = document.createElement("option");
       item.value = option.value;
@@ -115,7 +136,10 @@ function parameterRow(parameter) {
   if (parameter.kind === "boolean") {
     const label = document.createElement("label");
     label.className = "param-row param-toggle";
-    label.innerHTML = `<span>${parameter.label}</span>`;
+    label.title = parameter.name;
+    const name = document.createElement("span");
+    name.textContent = title;
+    label.appendChild(name);
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = parameter.value === "true";
@@ -124,25 +148,55 @@ function parameterRow(parameter) {
     return label;
   }
 
+  if (parameter.kind === "vector") {
+    const row = document.createElement("div");
+    row.className = "param-row param-vector-row";
+    const label = document.createElement("label");
+    label.textContent = title;
+    label.title = parameter.name;
+    const fields = document.createElement("div");
+    fields.className = "param-vector";
+    const inputs = parameter.components.map((n, i) => {
+      const { wrap, input } = numberInput(parameter, n, () => {
+        const next = inputs.map((el) => Number(el.value));
+        if (next.some((v) => !Number.isFinite(v) || (parameter.min !== undefined && v < parameter.min) || (parameter.max !== undefined && v > parameter.max))) {
+          syncParameters();
+          return;
+        }
+        changeSource(setParameter(state.source, parameter, `[${next.join(", ")}]`));
+      });
+      input.setAttribute("aria-label", `${title} ${i + 1}`);
+      fields.appendChild(wrap);
+      return input;
+    });
+    row.append(label, fields);
+    return row;
+  }
+
   const row = document.createElement("div");
   row.className = "param-row";
   const id = `param-${parameter.name}`;
   const unit = parameter.kind === "number" ? unitFor(parameter.name) : "";
   const label = document.createElement("label");
   label.htmlFor = id;
-  label.textContent = parameter.label;
-  const wrap = document.createElement("div");
-  wrap.className = "param-input-wrap";
-  const input = document.createElement("input");
+  label.textContent = title;
+  label.title = parameter.name;
+  if (parameter.kind === "text") {
+    const wrap = document.createElement("div");
+    wrap.className = "param-input-wrap";
+    const input = document.createElement("input");
+    input.id = id;
+    input.type = "text";
+    if (parameter.maxLength) input.maxLength = parameter.maxLength;
+    input.value = readableValue(parameter);
+    input.addEventListener("blur", () => commitParameter(parameter, input.value));
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") e.currentTarget.blur(); });
+    wrap.appendChild(input);
+    row.append(label, wrap);
+    return row;
+  }
+  const { wrap, input } = numberInput(parameter, parameter.value, (draft) => commitParameter(parameter, draft));
   input.id = id;
-  input.type = parameter.kind === "number" ? "number" : "text";
-  input.step = "any";
-  if (parameter.min !== undefined) input.min = String(parameter.min);
-  if (parameter.max !== undefined) input.max = String(parameter.max);
-  input.value = readableValue(parameter);
-  input.addEventListener("blur", () => commitParameter(parameter, input.value));
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") e.currentTarget.blur(); });
-  wrap.appendChild(input);
   if (unit) {
     const span = document.createElement("span");
     span.className = "param-unit";
@@ -150,7 +204,7 @@ function parameterRow(parameter) {
     wrap.appendChild(span);
   }
   row.append(label, wrap);
-  if (parameter.kind === "number" && parameter.min !== undefined && parameter.max !== undefined && parameter.max > parameter.min) {
+  if (parameter.min !== undefined && parameter.max !== undefined && parameter.max > parameter.min) {
     const range = document.createElement("input");
     range.className = "param-range";
     range.type = "range";
@@ -158,7 +212,7 @@ function parameterRow(parameter) {
     range.max = String(parameter.max);
     range.step = parameter.step === undefined ? "any" : String(parameter.step);
     range.value = parameter.value;
-    range.setAttribute("aria-label", `Adjust ${parameter.label}`);
+    range.setAttribute("aria-label", `Adjust ${title}`);
     range.addEventListener("input", () => {
       worker?.terminate();
       lastRender += 1;
@@ -177,13 +231,20 @@ function parameterRow(parameter) {
   return row;
 }
 
+function groupHeading(name) {
+  const heading = document.createElement("h3");
+  heading.className = "param-group";
+  heading.textContent = name.replace(/:+$/, "");
+  return heading;
+}
+
 function syncParameters() {
   const parameters = parseParameters(state.source);
   els.parameterContent.replaceChildren();
   if (!parameters.length) {
     const empty = document.createElement("div");
     empty.className = "parameter-empty";
-    empty.innerHTML = `${icons.sliders(22)}<strong>No simple parameters found</strong><p>Edit the code to change this model. Numeric, text, and boolean assignments at the top level appear here.</p>`;
+    empty.innerHTML = `${icons.sliders(22)}<strong>No Customizer parameters found</strong><p>Top-level assignments before the first <code>{</code> appear here. Use <code>// [min:step:max]</code>, dropdown lists, and <code>/* [Group] */</code> tabs as in OpenSCAD.</p>`;
     els.parameterContent.appendChild(empty);
     return;
   }
@@ -192,7 +253,15 @@ function syncParameters() {
   intro.textContent = "Adjust dimensions, then render to update the model.";
   const list = document.createElement("div");
   list.className = "parameter-list";
-  for (const parameter of parameters) list.appendChild(parameterRow(parameter));
+  const showGroups = parameters.some((parameter) => parameter.group);
+  let lastGroup = null;
+  for (const parameter of parameters) {
+    if (showGroups && parameter.group !== lastGroup) {
+      lastGroup = parameter.group;
+      if (parameter.group) list.appendChild(groupHeading(parameter.group));
+    }
+    list.appendChild(parameterRow(parameter));
+  }
   els.parameterContent.append(intro, list);
 }
 
