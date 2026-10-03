@@ -16,7 +16,8 @@
 // print bed together. Along each cut the honeycomb is filled solid, flush
 // with the back of the cells. The upright strip is the extra past the arm face.
 // The bed strip crosses the arm and continues that same distance past it, so
-// the assembled seam is centered on the arm. The four cuts leave a square hole
+// the assembled seam is centered on the arm. A spline on the upright cut keys
+// into a slot in the bed cut. The four cuts leave a square hole
 // at the hub. The pole bracket's plug fills that square, flush with the dish.
 
 /* [Selection] */
@@ -41,6 +42,16 @@ rim_width = 8; // [4:1:16]
 rim_depth = 8; // [4:1:16]
 printer_bed_mm = 256; // [180:1:400]
 print_yaw = 0; // [0:1:90]
+
+/* [Seam spline] */
+// Tongue height past the upright cut.
+spline_h = 1.8; // [0.8:0.1:4]
+// Tongue thickness, centered in the honeycomb fill.
+spline_t = 3.2; // [1.6:0.1:8]
+// Extra slot width on each side of the tongue thickness.
+spline_clear_t = 0.3; // [0.05:0.05:1]
+// Extra slot depth past the tongue height.
+spline_clear_h = 0.3; // [0.05:0.05:1]
 
 /* [Feed enclosure] */
 enclosure_size = 50; // [36:1:80]
@@ -101,6 +112,7 @@ rim_xy = dish_r + (rim_back_t + 0.5) * sin(rim_slope_deg);
 // Solid fill inside the honeycomb. The cut is one face of an arm. The upright
 // strip is the extra past that face; the bed strip matches it on the far side.
 upright_band = 4;
+spline_embed = 1.2;
 // Square plug is a hair under the hub gap so the quadrants close around it.
 plug_fit = 0.4;
 flange_t = 8;
@@ -141,6 +153,9 @@ assert(bolt_circle_r * cos(45) + bolt_d / 2 < flange_hx - 2, "Bolt holes leave t
 assert(bolt_circle_r * sin(45) + bolt_d / 2 < flange_hy - 2, "Bolt holes leave the flange");
 assert(bolt_circle_r - bolt_d / 2 > (arm_width / 2) * sqrt(2) + 1, "Bolt holes meet the hub gap");
 assert(plug_side > 4, "Hub plug is too small");
+assert(spline_t + 2 * spline_clear_t < honey_back, "Spline is thicker than the honeycomb fill");
+assert(spline_h + spline_clear_h < arm_width, "Spline slot cuts through the arm");
+assert(spline_embed < upright_band, "Spline root leaves the upright strip");
 if (clamp_pitch < min_clamp_pitch)
     echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
 
@@ -251,36 +266,31 @@ module para_shell(t0, t1, r0, r1) {
         ));
 }
 
-module square_grid(pitch, rib, r) {
-    n = ceil(r / pitch);
+// Hexagonal cells. Cylinder $fn=6 is vertex-to-vertex; spacing is center-to-center.
+module hex_grid(pitch, rib, r) {
     h = dish_depth + hub_thickness + 30;
-    for (i = [-n:n]) {
-        translate([i * pitch - rib / 2, -r - 1, -hub_thickness - 2])
-            cube([rib, 2 * r + 2, h]);
-        translate([-r - 1, i * pitch - rib / 2, -hub_thickness - 2])
-            cube([2 * r + 2, rib, h]);
+    c = pitch;
+    r_hole = (pitch - rib) / sqrt(3);
+    n = ceil(2 * r / c) + 2;
+    for (q = [-n:n], s = [-n:n]) {
+        x = c * sqrt(3) / 2 * q;
+        y = c * (s + q * 0.5);
+        if (x * x + y * y <= (r + c) * (r + c))
+            translate([x, y, -hub_thickness - 2])
+                cylinder(h=h, r=r_hole, $fn=6);
     }
 }
 
-module hex_grid(pitch, rib, r) {
-    n = ceil((r + pitch) / pitch);
-    h = dish_depth + hub_thickness + 30;
-    for (a = [0, 60, 120], i = [-n:n])
-        rotate([0, 0, a])
-            translate([i * pitch - rib / 2, -r * 1.6, -hub_thickness - 2])
-                cube([rib, r * 3.2, h]);
-}
-
 module mesh_skin() {
-    intersection() {
+    difference() {
         // Stop inside the rim and the hub so those solids contain this edge.
         para_shell(0, skin_thickness, hub_radius - 2, dish_r - rim_width + 2);
-        square_grid(grid_pitch, grid_rib, dish_r + grid_pitch);
+        hex_grid(grid_pitch, grid_rib, dish_r + grid_pitch);
     }
 }
 
 module honeycomb() {
-    intersection() {
+    difference() {
         // Starts inside the skin and ends inside the rim, so no shared face.
         para_shell(0.5, honey_back, hub_radius - 2, dish_r - rim_width + 1);
         hex_grid(honey_pitch, honey_rib, dish_r);
@@ -552,15 +562,15 @@ module edge_slab(q, bed, d0, d1) {
             cube([d1 - d0, rim_xy + arm_width / 2 + 4, dish_depth + hub_thickness + 40]);
 }
 
-// Fill the honeycomb along one cut. The band is the cell depth, not a shelf
-// behind it. The bed edge stays on the print plane, crosses the arm, and
-// continues upright_band past the far face. The upright edge is that same
-// distance past the cut, plus 0.2 mm of overlap so the quadrants share volume.
-// The strip runs through the inner rim so it meets the hoop; dish_r from the
-// offset corner stopped short of the far arc.
+// Fill the honeycomb along one cut, flush with the mesh front. The band is
+// the cell depth, not a shelf behind it. The bed edge stays on the print
+// plane, crosses the arm, and continues upright_band past the far face. The
+// upright edge is that same distance past the cut, plus 0.2 mm of overlap so
+// the quadrants share volume. The strip runs through the inner rim so it
+// meets the hoop; dish_r from the offset corner stopped short of the far arc.
 module edge_binding(q, bed) {
     intersection() {
-        para_shell(0.5, honey_back, hub_radius - 2, dish_r - 1);
+        para_shell(0, honey_back, hub_radius - 2, dish_r - 1);
         if (bed)
             edge_slab(q, true, 0, arm_width + upright_band);
         else
@@ -568,9 +578,34 @@ module edge_binding(q, bed) {
     }
 }
 
+function spline_t_mid() = honey_back / 2;
+function spline_r0() = hub_radius + 4;
+function spline_r1() = dish_r - rim_width - 2;
+
+module upright_spline(q) {
+    tm = spline_t_mid();
+    intersection() {
+        para_shell(tm - spline_t / 2, tm + spline_t / 2, spline_r0(), spline_r1());
+        edge_slab(q, false, -spline_h, spline_embed);
+    }
+}
+
+module bed_slot(q) {
+    tm = spline_t_mid();
+    intersection() {
+        para_shell(
+            tm - spline_t / 2 - spline_clear_t,
+            tm + spline_t / 2 + spline_clear_t,
+            spline_r0() - 1, spline_r1() + 1
+        );
+        edge_slab(q, true, -0.2, spline_h + spline_clear_h);
+    }
+}
+
 module quadrant_seams(q) {
     edge_binding(q, true);
     edge_binding(q, false);
+    upright_spline(q);
 }
 
 function bolt_xy(i) = let(a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
@@ -609,6 +644,7 @@ module quadrant_raw(q) {
             quadrant_seams(q);
         }
         hub_bolt_holes();
+        bed_slot(q);
         if (q == 3) feed_void();
     }
 }
@@ -691,6 +727,8 @@ module assembly() {
         feed_void();
         key_void();
         hub_bolt_holes();
+        for (q = [0:3])
+            bed_slot(q);
     }
     place_front_lid();
     place_back_lid();
