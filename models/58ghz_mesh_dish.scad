@@ -8,8 +8,8 @@
 // should be printed in an unplated low-loss plastic. The gasket is for TPU.
 //
 // Vertex at the origin, opening toward +Z, focus at z = focal_length.
-// The pole is on the back of the dish along +Y. +Y is up when installed,
-// so the hollow arm at 270° points down and its rim mouth drains water out.
+// +Y is up when installed, so the hollow arm at 270° points down and its
+// rim mouth drains water out.
 //
 // part selects the solid to export. Each quadrant seam is the plane of one
 // side of that quadrant's arm, so the arm side and the dish cut lie on the
@@ -17,7 +17,7 @@
 // with the back of the cells. The upright strip is the extra past the arm face.
 // The bed strip crosses the arm and continues that same distance past it, so
 // the assembled seam is centered on the arm. The four cuts leave a square hole
-// at the hub. The pole bracket fills that square and keys the quadrants at 90°.
+// at the hub. The pole bracket's plug fills that square, flush with the dish.
 
 /* [Selection] */
 part = "assembly"; // [assembly,quadrant_1,quadrant_2,quadrant_3,quadrant_4,front_lid,back_lid,gasket,pole_bracket]
@@ -42,12 +42,6 @@ rim_depth = 8; // [4:1:16]
 printer_bed_mm = 256; // [180:1:400]
 print_yaw = 0; // [0:1:90]
 
-/* [Pole bracket] */
-pole_diameter = 32; // [20:0.5:60]
-pole_clearance = 0.8; // [0.2:0.1:2]
-clamp_band_width = 12.7; // [8:0.1:20]
-clamp_slot = 2.5; // [1.5:0.1:4]
-
 /* [Feed enclosure] */
 enclosure_size = 50; // [36:1:80]
 enclosure_wall = 2; // [1.6:0.1:4]
@@ -56,6 +50,14 @@ arm_height = 6; // [4:0.5:12]
 feed_bore_width = 8; // [4:0.5:14]
 feed_bore_height = 3; // [2:0.5:8]
 radome_thickness = 1.2; // [0.8:0.1:2.5]
+
+/* [Pole bracket] */
+pole_diameter = 32; // [20:0.5:60]
+pole_clearance = 0.8; // [0.2:0.1:2]
+clamp_band_width = 12.7; // [8:0.1:20]
+clamp_slot = 2.5; // [1.5:0.1:4]
+bolt_d = 5; // [3:0.1:8]
+bolt_circle_r = 28; // [16:1:40]
 
 /* [Hidden] */
 $fn = 64;
@@ -88,14 +90,32 @@ gasket_h = 1.4;
 lid_t = 3.2;
 lip_t = 3;
 honey_back = skin_thickness + honey_depth;
-bolt_d = 4.5;
-// Square left where the offset seams no longer meet. The bracket's key is a
-// hair smaller so the four quadrants seat around it.
-key_size = arm_width - 0.4;
-key_h = hub_thickness - 2;
 // Solid fill inside the honeycomb. The cut is one face of an arm. The upright
 // strip is the extra past that face; the bed strip matches it on the far side.
 upright_band = 4;
+// Square plug is a hair under the hub gap so the quadrants close around it.
+plug_fit = 0.4;
+flange_t = 8;
+clamp_pitch = 72;
+cheek_y = clamp_band_width + 6;
+pole_r = pole_diameter / 2 + pole_clearance;
+flange_back = -hub_thickness - flange_t;
+// 45° V opening away from the dish. Stair corners lie on the two faces.
+// The third corner on each face is where the pole is tangent.
+contact = pole_r / sqrt(2);
+stair = contact / 3;
+v_steps = 6;
+v_wall = 4;
+// Stairs begin on the underside of the flange. A web here left a thin
+// rectangle across each clamp station.
+z_apex = flange_back;
+pole_cz = z_apex - pole_r * sqrt(2);
+cheek_back = pole_cz;
+v_half = v_steps * stair;
+// Rectangular plate. Its corners are the outer corners of the two clamp stations.
+flange_hx = v_half + v_wall;
+flange_hy = clamp_pitch / 2 + cheek_y / 2;
+plug_side = arm_width - plug_fit;
 
 echo(lambda_mm=lambda_mm, surface_opening_mm=surface_opening, rim_slope_deg=rim_slope_deg);
 echo(xy_opening_mm=xy_opening, xy_pitch_mm=xy_pitch, open_fraction=open_fraction);
@@ -107,6 +127,11 @@ assert(enclosure_size >= 36, "Enclosure is too small for the corner posts");
 assert(feed_bore_width < arm_width - 2 && feed_bore_height < arm_height - 1, "Feed bore does not fit in the arm");
 assert(gasket_half - groove_w / 2 > inner_opening / 2, "Gasket leaves the land");
 assert((enclosure_size / 2) * sqrt(2) + arm_width < dish_r - rim_width, "Enclosure corner reaches the rim");
+assert(bolt_circle_r * cos(45) + bolt_d / 2 < flange_hx - 2, "Bolt holes leave the flange");
+assert(bolt_circle_r * sin(45) + bolt_d / 2 < flange_hy - 2, "Bolt holes leave the flange");
+assert(bolt_circle_r - bolt_d / 2 > (arm_width / 2) * sqrt(2) + 1, "Bolt holes meet the hub gap");
+assert(clamp_pitch / 2 - cheek_y / 2 > bolt_circle_r * sin(45) + bolt_d / 2 + 1, "Clamp cheek covers a bolt hole");
+assert(plug_side > 4, "Hub plug is too small");
 
 function z_of(r) = r * r / (4 * focal_length);
 function ang_of(r) = atan(r / (2 * focal_length));
@@ -476,14 +501,6 @@ module place_gasket(s) {
                 mirror([0, 0, 1]) gasket();
 }
 
-function bolt_xy(q) = q == 0 ? [32, 0] : q == 1 ? [22, 34] : q == 2 ? [-32, 0] : [22, -34];
-
-module bolt_hole(q) {
-    p = bolt_xy(q);
-    translate([p[0], p[1], -hub_thickness - 1])
-        cylinder(h=hub_thickness + dish_depth, d=bolt_d, $fn=24);
-}
-
 // The bed edge is the arm-side plane that sits on the printer. The other edge
 // is the neighbor's arm-side plane. Normals point into this quadrant.
 function edge_normal(q, bed) =
@@ -547,6 +564,19 @@ module quadrant_seams(q) {
     edge_binding(q, false);
 }
 
+function bolt_xy(i) = let(a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
+
+// Plain through-holes, one in each quadrant. They run from the hub back face
+// out through the front face. Countersinks and threads come later.
+module hub_bolt_holes() {
+    for (i = [0:3]) {
+        p = bolt_xy(i);
+        translate([p[0], p[1], -hub_thickness - 2])
+            cylinder(h=hub_thickness + 10, d=bolt_d, $fn=24);
+    }
+}
+
+// Square left where the offset seams no longer meet.
 module key_void() {
     translate([-arm_width / 2, -arm_width / 2, -hub_thickness - 4])
         cube([arm_width, arm_width, hub_thickness + 30]);
@@ -569,7 +599,7 @@ module quadrant_raw(q) {
             }
             quadrant_seams(q);
         }
-        bolt_hole(q);
+        hub_bolt_holes();
         if (q == 3) feed_void();
     }
 }
@@ -591,47 +621,52 @@ module quadrant_print(q) {
                 quadrant_raw(q);
 }
 
-module pole_bracket() {
-    plate = 96;
-    plate_t = 6;
-    pole_r = pole_diameter / 2 + pole_clearance;
-    ear = 8;
-    seat = 4;
-    pole_cz = plate_t + seat + pole_r;
-    y_len = 78;
-    difference() {
-        union() {
-            translate([-plate / 2, -plate / 2, 0])
-                cube([plate, plate, plate_t]);
-            // Square key. It stands off the hub face of the plate and fills
-            // the hole the quadrants leave at the center.
-            translate([-key_size / 2, -key_size / 2, -key_h])
-                cube([key_size, key_size, key_h + 0.2]);
-            translate([-pole_r - ear, -y_len / 2, plate_t])
-                cube([2 * (pole_r + ear), y_len, pole_cz - plate_t]);
-        }
-        translate([0, 0, pole_cz])
-            rotate([-90, 0, 0])
-                cylinder(h=y_len + 4, r=pole_r, center=true, $fn=64);
-        for (q = [0:3]) {
-            p = bolt_xy(q);
-            translate([p[0], p[1], -1])
-                cylinder(h=plate_t + seat + 2, d=bolt_d, $fn=24);
-        }
-        for (y = [-18, 18], side = [-1, 1])
-            translate([side * (pole_r + ear / 2), y, pole_cz])
-                cube([ear + 4, clamp_band_width, clamp_slot], center=true);
+// One clamp station. The outside is a straight wall. The inside is a stair-step
+// V opening away from the dish, and the pole sits in that V.
+module clamp_station(station_y) {
+    outer = v_half + v_wall;
+    for (i = [0:v_steps - 1]) {
+        z_top = z_apex - i * stair;
+        inner = (i + 1) * stair;
+        extra = i == 0 ? 0.2 : 0;
+        translate([-outer, station_y - cheek_y / 2, z_top - stair])
+            cube([outer - inner, cheek_y, stair + extra]);
+        translate([inner, station_y - cheek_y / 2, z_top - stair])
+            cube([outer - inner, cheek_y, stair + extra]);
     }
 }
 
-module pole_bracket_print() {
-    translate([0, 0, key_h]) pole_bracket();
+// Plug face is the reflector vertex. The flange and the clamp stations share
+// the hub back face. Each station is a stair-step V the pole sits in. The
+// clamp band passes through a slot between that face and the V, then around
+// the pole.
+module pole_bracket() {
+    difference() {
+        union() {
+            translate([-plug_side / 2, -plug_side / 2, -hub_thickness - 0.2])
+                cube([plug_side, plug_side, hub_thickness + 0.2]);
+            translate([-flange_hx, -flange_hy, flange_back])
+                cube([2 * flange_hx, 2 * flange_hy, flange_t]);
+            for (s = [-1, 1])
+                clamp_station(s * clamp_pitch / 2);
+        }
+        // Opens on the underside of the flange and clears the first step, so no
+        // thin plate is left across the station.
+        slot_h = max(clamp_slot, stair) + 0.2;
+        for (s = [-1, 1])
+            translate([0, s * clamp_pitch / 2, flange_back - (slot_h - 0.2) / 2])
+                cube([2 * (v_half + v_wall) + 4, clamp_band_width + 1, slot_h], center=true);
+        for (i = [0:3]) {
+            p = bolt_xy(i);
+            translate([p[0], p[1], flange_back - 1])
+                cylinder(h=flange_t + 2, d=bolt_d, $fn=24);
+        }
+    }
 }
 
-module bracket_mounted() {
-    translate([0, 0, -hub_thickness])
-        rotate([180, 0, 0])
-            pole_bracket();
+// Flat back of the cradle on the bed. The plug points up.
+module pole_bracket_print() {
+    translate([0, 0, -cheek_back]) pole_bracket();
 }
 
 module assembly() {
@@ -646,14 +681,13 @@ module assembly() {
         }
         feed_void();
         key_void();
-        for (q = [0:3])
-            bolt_hole(q);
+        hub_bolt_holes();
     }
     place_front_lid();
     place_back_lid();
     place_gasket(-1);
     place_gasket(1);
-    bracket_mounted();
+    pole_bracket();
 }
 
 function active_q() =
