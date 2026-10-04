@@ -25,7 +25,7 @@
 
 /* [Selection] */
 part = "assembly"; // [assembly,quadrant_1,quadrant_2,quadrant_3,quadrant_4,front_lid,back_lid,gasket,pole_bracket,rear_lid,rear_gasket]
-fast_preview = false;
+fast_preview = true;
 
 /* [Dish and RF] */
 frequency_GHz = 5.8; // [5:0.1:6.5]
@@ -117,7 +117,6 @@ shell_fn = fast_preview ? 48 : 96;
 shell_n = fast_preview ? 18 : 40;
 para_r_max = dish_r + 30;
 para_z_floor = -hub_thickness - 200;
-para_prism_h = dish_depth + hub_thickness + 400;
 
 inner_opening = enclosure_size - 16;
 gasket_half = enclosure_size / 2 - 5;
@@ -197,7 +196,6 @@ if (clamp_pitch < min_clamp_pitch)
     echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
 
 function z_of(r) = r * r / (4 * focal_length);
-function ang_of(r) = atan(r / (2 * focal_length));
 
 function rear_cx() = rear_box_split ? 0 : (-arm_width / 2 + rear_box_w / 2 + rear_box_x);
 function rear_rim_outer() = dish_r;
@@ -259,6 +257,8 @@ function arm_u(th) = unit(vsub(arm_encl(th), arm_rim(th)));
 function arm_len(th) = vnorm(vsub(arm_encl(th), arm_rim(th)));
 function arm_mid(th, extra_encl = 4, extra_rim = 0) =
     vadd(arm_rim(th), vmul(arm_u(th), (arm_len(th) + extra_encl - extra_rim) / 2));
+
+function feed_inner_r() = dish_r - rim_width;
 
 echo(arm_angle_deg=atan2(
     arm_encl(270)[2] - arm_rim(270)[2],
@@ -374,13 +374,13 @@ function span_of(pts, idx) = vmax([for (p = pts) p[idx]]) - vmin([for (p = pts) 
 function min_z(q) = vmin([for (p = printed(q)) p[2]]);
 
 // Solid on or below the inner face z = r²/(4f), out to para_r_max.
+// No render(): the workbench uses Manifold; render() forces CGAL and OOMs.
 module para_tool() {
-    render(convexity=8)
-        rotate_extrude($fn=shell_fn)
-            polygon(concat(
-                [[0, para_z_floor], [para_r_max, para_z_floor], [para_r_max, z_of(para_r_max)]],
-                [for (i = [shell_n:-1:0]) let(r = para_r_max * i / shell_n) [r, z_of(r)]]
-            ));
+    rotate_extrude($fn=shell_fn)
+        polygon(concat(
+            [[0, para_z_floor], [para_r_max, para_z_floor], [para_r_max, z_of(para_r_max)]],
+            [for (i = [shell_n:-1:0]) let(r = para_r_max * i / shell_n) [r, z_of(r)]]
+        ));
 }
 
 // Band t0..t1 behind the inner face. Thickness is in Z, not along the normal.
@@ -393,13 +393,14 @@ module para_slab(t0, t1) {
 
 // 2D footprint (XY) extruded, then cut to parabolic thickness t0..t1.
 module para_layer(t0, t1) {
-    render(convexity=16)
-        intersection() {
-            translate([0, 0, para_z_floor])
-                linear_extrude(height=para_prism_h, convexity=16)
-                    children();
-            para_slab(t0, t1);
-        }
+    z0 = -max(t1, hub_thickness) - 4;
+    z1 = dish_depth - min(t0, 0) + 4;
+    intersection() {
+        translate([0, 0, z0])
+            linear_extrude(height=z1 - z0)
+                children();
+        para_slab(t0, t1);
+    }
 }
 
 module annulus_2d(r0, r1) {
@@ -415,33 +416,33 @@ module hex_2d(pitch, rib, r) {
     c = pitch;
     r_hole = (pitch - rib) / sqrt(3);
     n = ceil(2 * r / c) + 2;
-    union() {
-        for (q = [-n:n], s = [-n:n]) {
-            x = c * sqrt(3) / 2 * q;
-            y = c * (s + q * 0.5);
-            if (x * x + y * y <= (r + c) * (r + c))
-                translate([x, y])
-                    circle(r=r_hole, $fn=6);
-        }
+    for (q = [-n:n], s = [-n:n]) {
+        x = c * sqrt(3) / 2 * q;
+        y = c * (s + q * 0.5);
+        if (x * x + y * y <= (r + c) * (r + c))
+            translate([x, y])
+                circle(r=r_hole, $fn=6);
+    }
+}
+
+// Annulus minus hexes. Holes that straddle hub or rim are clipped, not dropped.
+module hex_annulus_2d(r0, r1, pitch, rib) {
+    difference() {
+        annulus_2d(r0, r1);
+        hex_2d(pitch, rib, r1 + pitch);
     }
 }
 
 // Hex-perforated front skin of the reflector, between hub and rim.
 module mesh_skin() {
     para_layer(0, skin_thickness)
-        difference() {
-            annulus_2d(hub_radius - 2, dish_r - rim_width + 2);
-            hex_2d(grid_pitch, grid_rib, dish_r + grid_pitch);
-        }
+        hex_annulus_2d(hub_radius - 2, dish_r - rim_width + 2, grid_pitch, grid_rib);
 }
 
 // Honeycomb backing behind the skin, stopping inside the rim hoop.
 module honeycomb() {
     para_layer(0.5, honeycomb_back)
-        difference() {
-            annulus_2d(hub_radius - 2, dish_r - rim_width + 1);
-            hex_2d(honeycomb_pitch, honeycomb_rib, dish_r);
-        }
+        hex_annulus_2d(hub_radius - 2, dish_r - rim_width + 1, honeycomb_pitch, honeycomb_rib);
 }
 
 // Solid band over the hub edge, behind the front surface. Mesh ribs end here.
@@ -466,14 +467,13 @@ module hub_pad() {
 
 // Full reflector: skin, honeycomb, rim, hub pad, and hub weld.
 module dish_body() {
-    render(convexity=16)
-        union() {
-            mesh_skin();
-            honeycomb();
-            rim_hoop();
-            hub_pad();
-            hub_weld();
-        }
+    union() {
+        mesh_skin();
+        honeycomb();
+        rim_hoop();
+        hub_pad();
+        hub_weld();
+    }
 }
 
 // Volume of one print quadrant. The two cuts are coplanar with the arm sides,
@@ -533,12 +533,18 @@ module arm_rim_clip() {
         cylinder(h=1000, r=dish_r, $fn=shell_fn);
 }
 
-// Volume behind the dish back face. The arm may not occupy this.
+// Behind the vertical rim hoop only, not the whole dish back (that would
+// carve the arm along its length).
 module behind_dish_back() {
-    translate([0, 0, -rim_back_t]) para_tool();
+    intersection() {
+        para_slab(rim_back_t, rim_back_t + 80);
+        translate([0, 0, para_z_floor])
+            linear_extrude(height=dish_depth + hub_thickness + 220)
+                annulus_2d(dish_r - rim_width - 12, dish_r + 8);
+    }
 }
 
-// Arm from the enclosure face to the rim, not yet cut behind the dish.
+// Arm from the enclosure face to the rim, not yet cut behind the hoop.
 module arm_prism(th) {
     intersection() {
         arm_blank(th, arm_width, arm_height, 4, 2);
@@ -547,46 +553,56 @@ module arm_prism(th) {
     }
 }
 
-// Printed strut at azimuth th, cut off behind the dish back.
+// Printed strut at azimuth th.
 module arm_solid(th) {
     difference() {
         arm_prism(th);
-        behind_dish_back();
+        if (!(rear_box && th == 270))
+            behind_dish_back();
     }
 }
 
-// All four arm blanks, cut once against the parabola tool.
+// All four arm blanks. With a rear box the 270° arm runs to the outer hoop;
+// the bore still stops at the inner rim.
 module arms_solid() {
     difference() {
         union() {
-            for (q = [0:3])
+            for (q = [0:2])
                 arm_prism(arm_theta(q));
+            if (!rear_box)
+                arm_prism(270);
         }
         behind_dish_back();
     }
+    if (rear_box)
+        arm_prism(270);
 }
 
-// Conduit through the quadrant-4 arm. Same section as the arm. The arm-axis
-// cut stops at the rim so it does not nick the sloped outer face. A second
-// cut along the rim normal opens the back of the hoop and leaves arm_wall of
-// that outer face. That cut stops at the dish inner face so its top cannot
-// notch the arm's outer wall.
+// Conduit through the quadrant-4 arm. Concentric with the arm. With a rear
+// box the bore is clipped to the inner-rim cylinder (Z-parallel, same curve
+// as the hoop) so it ends before the rim.
 module feed_void() {
     th = 270;
-    a = ang_of(dish_r);
     rad = arm_radial(th);
-    n_back = [rad[0] * sin(a), rad[1] * sin(a), -cos(a)];
-    through = rim_back_t + arm_height / 2 + 4;
-    arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 0);
-    if (!rear_box)
+    if (rear_box) {
+        intersection() {
+            arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 4);
+            translate([0, 0, -500])
+                cylinder(h=1000, r=feed_inner_r() - 0.2, $fn=shell_fn);
+        }
+    } else {
+        arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 0);
+        r0 = dish_r - rim_width - 4;
+        r1 = dish_r - arm_wall;
         intersection() {
             frame_cube(
-                vadd(arm_rim(th), vmul(n_back, through / 2)),
-                n_back, arm_az(th), [0, 0, 1],
-                [through, feed_bore_width, feed_bore_height]
+                [((r0 + r1) / 2) * rad[0], ((r0 + r1) / 2) * rad[1], z_of(dish_r) - arm_height / 2],
+                rad, arm_az(th), [0, 0, 1],
+                [r1 - r0, feed_bore_width, feed_bore_height]
             );
-            para_slab(0, rim_back_t + arm_height + 20);
+            para_slab(0, rim_back_t + arm_height / 2);
         }
+    }
 }
 
 // Rounded square of half-width `half`.
@@ -985,6 +1001,40 @@ module quadrant_seams(q) {
     upright_spline(q);
 }
 
+module assembly_bindings() {
+    para_layer(0, honeycomb_back)
+        union() {
+            for (q = [0:3]) {
+                edge_strip_ring_2d(q, true, 0, arm_width + upright_band, hub_radius - 2, dish_r - 1);
+                edge_strip_ring_2d(q, false, -0.2, upright_band, hub_radius - 2, dish_r - 1);
+            }
+        }
+}
+
+module assembly_splines() {
+    tm = spline_t_mid();
+    para_layer(tm - spline_t / 2, tm + spline_t / 2)
+        union() {
+            for (q = [0:3])
+                edge_strip_ring_2d(q, false, -spline_h, spline_embed, spline_r0(), spline_r1());
+        }
+}
+
+module assembly_slots() {
+    tm = spline_t_mid();
+    para_layer(
+        tm - spline_t / 2 - spline_clear_t,
+        tm + spline_t / 2 + spline_clear_t
+    )
+        union() {
+            for (q = [0:3])
+                edge_strip_ring_2d(
+                    q, true, -0.2, spline_h + spline_clear_h,
+                    spline_r0() - 1, spline_r1() + 1
+                );
+        }
+}
+
 function bolt_xy(i) = let(a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
 
 function hub_bolt_recess_d() =
@@ -1131,8 +1181,8 @@ module assembly() {
                 union() {
                     dish_body();
                     arms_solid();
-                    for (q = [0:3])
-                        quadrant_seams(q);
+                    assembly_bindings();
+                    assembly_splines();
                 }
                 if (rear_box)
                     rear_box_cavity();
@@ -1144,8 +1194,7 @@ module assembly() {
         feed_void();
         key_void();
         hub_bolt_holes();
-        for (q = [0:3])
-            bed_slot(q);
+        assembly_slots();
     }
     place_front_lid();
     place_back_lid();
