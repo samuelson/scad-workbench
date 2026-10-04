@@ -17,11 +17,11 @@
 // part selects the solid to export. Each quadrant seam is the plane of one
 // side of that quadrant's arm, so the arm side and the dish cut lie on the
 // print bed together. Along each cut the honeycomb is filled solid, flush
-// with the back of the cells. The upright strip is the extra past the arm face.
-// The bed strip crosses the arm and continues that same distance past it, so
-// the assembled seam is centered on the arm. A spline on the upright cut keys
-// into a slot in the bed cut. The four cuts leave a square hole
-// at the hub. The pole bracket's plug fills that square, flush with the dish.
+// with the back of the cells. The bed strip crosses the arm so the assembled
+// seam is centered on it. A half-lap keys the upright rear into a rabbet on
+// the bed rear; seam bolts come from the dish back into heat-set inserts.
+// The four cuts leave a square hole at the hub. The pole bracket's plug fills
+// that square, flush with the dish.
 
 /* [Selection] */
 part = "assembly"; // [assembly,quadrant_1,quadrant_2,quadrant_3,quadrant_4,front_lid,back_lid,gasket,pole_bracket,rear_lid,rear_gasket]
@@ -46,15 +46,13 @@ rim_depth = 8; // [4:1:16]
 printer_bed_mm = 256; // [180:1:400]
 print_yaw = 0; // [0:1:90]
 
-/* [Seam spline] */
-// Tongue height past the upright cut.
-spline_h = 16; // [0.8:0.1:16]
-// Tongue thickness, centered in the honeycomb fill.
-spline_t = 2; // [1.6:0.1:8]
-// Extra slot width on each side of the tongue thickness.
-spline_clear_t = 0.3; // [0.05:0.05:1]
-// Extra slot depth past the tongue height.
-spline_clear_h = 0.3; // [0.05:0.05:1]
+/* [Seam lap] */
+// Overlap of the half-lap, past the upright cut into the bed piece.
+lap_w = 16; // [8:0.5:30]
+// Extra width on the rabbet.
+lap_clear = 0.25; // [0.1:0.05:0.6]
+// Through-bolts from the dish back into heat-set inserts.
+seam_bolt = "M3"; // [M3, M4, M5]
 
 /* [Feed enclosure] */
 enclosure_size = 50; // [36:1:80]
@@ -78,6 +76,11 @@ rear_box_w = 104; // [70:1:160]
 rear_box_l = 92; // [60:1:140]
 // Extra depth behind the dish back at the hub-ward edge.
 rear_box_depth = 28; // [16:1:60]
+// Posts on the Pi 4/5 hole pattern, inside the cavity.
+pi_mount = false;
+// Hub-ward post height. Rim-ward posts stay longer by the dish sag; all four
+// change by the same amount.
+pi_standoff_h = 10; // [4:0.5:24]
 
 /* [Pole bracket] */
 pole_diameter = 32; // [20:0.5:60]
@@ -102,6 +105,8 @@ $fn = 64;
 
 feed_bore_height = arm_height - 2 * arm_wall;
 feed_bore_width = arm_width - 2 * arm_wall;
+// Extra back-of-dish opening, toward the hub from the inner rim.
+feed_mouth = arm_height;
 
 lambda_mm = 299.792458 / frequency_GHz;
 surface_opening = mesh_opening_lambda * lambda_mm;
@@ -138,7 +143,9 @@ rim_xy = dish_r + 4;
 // Solid fill inside the honeycomb. The cut is one face of an arm. The upright
 // strip is the extra past that face; the bed strip matches it on the far side.
 upright_band = 4;
-spline_embed = 1.2;
+lap_t = honeycomb_back / 2;
+lap_keep = 8;
+seam_n = 3;
 // Square plug is a hair under the hub gap so the quadrants close around it.
 plug_fit = 0.4;
 flange_t = 8;
@@ -166,7 +173,6 @@ plug_side = arm_width - plug_fit;
 rear_front_t = max(enclosure_wall, skin_thickness);
 pi_hole_span_x = 58;
 pi_hole_span_y = 49;
-pi_standoff_h = 6;
 pi_standoff_d = 6.4;
 pi_pilot_d = 2.05;
 rear_boss_inset = post_r + 0.8;
@@ -189,13 +195,64 @@ assert(bolt_circle_r - bolt_d / 2 > (arm_width / 2) * sqrt(2) + 1, "Bolt holes m
 assert(hub_bolt_recess == "none" || hub_bolt_recess_h <= 0 || hub_bolt_recess_size > bolt_d, "Bolt recess is smaller than the shank");
 assert(hub_bolt_recess == "none" || hub_bolt_recess_h <= 0 || hub_bolt_recess_h < hub_thickness - 2, "Bolt recess goes through the hub");
 assert(plug_side > 4, "Hub plug is too small");
-assert(spline_t + 2 * spline_clear_t < honeycomb_back, "Spline is thicker than the honeycomb fill");
-assert(spline_h + spline_clear_h < arm_width, "Spline slot cuts through the arm");
-assert(spline_embed < upright_band, "Spline root leaves the upright strip");
+assert(lap_w > seam_insert_d() + 4, "Lap is too narrow for the insert");
+assert(seam_insert_h() < lap_t - 0.6, "Insert is longer than the lap thickness");
+assert(
+    min([for (q = [0:3]) seam_s_hi(q) - seam_s_lo(q)])
+        > seam_n * (seam_insert_d() + 6),
+    "Lap is too short for the inserts"
+);
 if (clamp_pitch < min_clamp_pitch)
     echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
 
 function z_of(r) = r * r / (4 * focal_length);
+
+function seam_bolt_d() =
+    seam_bolt == "M3" ? 3 : (seam_bolt == "M4" ? 4 : 5);
+function seam_bolt_hole() = seam_bolt_d() + 0.3;
+function seam_insert_d() =
+    seam_bolt == "M3" ? 4.0 : (seam_bolt == "M4" ? 5.6 : 6.5);
+function seam_insert_h() =
+    min(
+        seam_bolt == "M3" ? 4 : (seam_bolt == "M4" ? 8 : 9.5),
+        lap_t - 0.8
+    );
+function lap_r0() = hub_radius + 8;
+function lap_r1() = dish_r - rim_width - 2;
+
+function seam_s_at_r(q, r) =
+    let(
+        n = edge_normal(q, true),
+        t = edge_tangent(q, true),
+        o = edge_corner(q),
+        d = lap_w / 2,
+        px = o[0] + n[0] * d,
+        py = o[1] + n[1] * d,
+        bb = 2 * (px * t[0] + py * t[1]),
+        cc = px * px + py * py - r * r,
+        disc = bb * bb - 4 * cc
+    )
+        disc <= 0 ? 0 : (-bb + sqrt(disc)) / 2;
+
+function seam_s_lo(q) = seam_s_at_r(q, lap_r0());
+function seam_s_hi(q) =
+    min(
+        seam_s_at_r(q, lap_r1()),
+        (rear_box && q == 3)
+            ? (-arm_width / 2 - rear_y_hub() - lap_keep) : 1e9
+    );
+
+function seam_bolt_xy(q, i) =
+    let(
+        n = edge_normal(q, true),
+        t = edge_tangent(q, true),
+        o = edge_corner(q),
+        d = lap_w / 2,
+        s0 = seam_s_lo(q),
+        s1 = seam_s_hi(q),
+        s = s0 + (s1 - s0) * (i + 0.5) / seam_n
+    )
+        [o[0] + n[0] * d + t[0] * s, o[1] + n[1] * d + t[1] * s];
 
 function rear_cx() = rear_box_split ? 0 : (-arm_width / 2 + rear_box_w / 2 + rear_box_x);
 function rear_rim_outer() = dish_r;
@@ -213,7 +270,22 @@ function rear_z_lid() = z_of(rear_r_hub()) - honeycomb_back - rear_box_depth;
 function rear_z_top() = z_of(dish_r) + 1;
 function pi_cx() = rear_cx();
 function pi_cy() = (rear_y_hub() - rear_rim_outer()) / 2 + 6;
-function pi_z_top() = rear_z_lid() + lip_t + 16;
+function pi_hole_xy(sx, sy) = [
+    pi_cx() + sx * pi_hole_span_x / 2,
+    pi_cy() + sy * pi_hole_span_y / 2
+];
+function pi_hole_r(sx, sy) =
+    let(p = pi_hole_xy(sx, sy))
+        sqrt(p[0] * p[0] + p[1] * p[1]);
+// Cavity face of the dish-side wall at a Pi hole, along Z.
+function pi_dish_z(sx, sy) = z_of(pi_hole_r(sx, sy)) - rear_front_t;
+function pi_dish_z_min() =
+    min(pi_dish_z(-1, -1), pi_dish_z(-1, 1), pi_dish_z(1, -1), pi_dish_z(1, 1));
+// Extra length so rim-ward posts still reach the dish from the shared board plane.
+function pi_post_extra(sx, sy) = pi_dish_z(sx, sy) - pi_dish_z_min();
+function pi_post_len(sx, sy) = pi_standoff_h + pi_post_extra(sx, sy);
+// Shared board plane. Changing pi_standoff_h shifts every post by the same Z.
+function pi_board_z() = pi_dish_z_min() - pi_standoff_h;
 function rear_cav_x0() = rear_x0() + enclosure_wall;
 function rear_cav_x1() = rear_x1() - enclosure_wall;
 function rear_boss_rim_y(x) =
@@ -259,6 +331,8 @@ function arm_mid(th, extra_encl = 4, extra_rim = 0) =
     vadd(arm_rim(th), vmul(arm_u(th), (arm_len(th) + extra_encl - extra_rim) / 2));
 
 function feed_inner_r() = dish_r - rim_width;
+function feed_bore_r1() = feed_inner_r() - 0.2;
+function feed_bore_r0() = feed_bore_r1() - feed_mouth;
 
 echo(arm_angle_deg=atan2(
     arm_encl(270)[2] - arm_rim(270)[2],
@@ -292,9 +366,14 @@ if (rear_box) {
         "Split rear box does not cross the q3/q4 seam"
     );
     assert(
-        abs(pi_cx()) - pi_hole_span_x / 2 > feed_bore_width / 2 + pi_standoff_d / 2
+        !pi_mount
+            || abs(pi_cx()) - pi_hole_span_x / 2 > feed_bore_width / 2 + pi_standoff_d / 2
             || abs(pi_cy() + arm_rim_r()) > feed_bore_height + pi_standoff_d,
         "Pi standoffs sit in the feed bore"
+    );
+    assert(
+        !pi_mount || pi_board_z() > rear_z_lid() + lip_t + 1,
+        "Pi standoffs reach the rear lid"
     );
 }
 
@@ -578,31 +657,40 @@ module arms_solid() {
         arm_prism(270);
 }
 
-// Conduit through the quadrant-4 arm. Concentric with the arm. With a rear
-// box the bore is clipped to the inner-rim cylinder (Z-parallel, same curve
-// as the hoop) so it ends before the rim.
+// XY of the back opening: bore-wide strip along the 270° arm, from the inner
+// rim toward the hub. pad_in lengthens it hub-ward; half_w is the X half-span.
+module feed_mouth_2d(pad_in, half_w) {
+    r1 = feed_bore_r1();
+    r0 = feed_bore_r0() - pad_in;
+    intersection() {
+        translate([-half_w, -r1 - 2])
+            square([2 * half_w, r1 - r0 + 4]);
+        annulus_2d(max(r0, hub_radius), r1);
+    }
+}
+
+// Solid honeycomb fill around the extra mouth: side walls flush with the arm,
+// and a hub-ward bulkhead, so the cut does not open into the cells.
+module feed_mouth_walls() {
+    para_layer(0, honeycomb_back)
+        difference() {
+            feed_mouth_2d(arm_wall, arm_width / 2);
+            feed_mouth_2d(0, feed_bore_width / 2);
+        }
+}
+
+// Conduit through the quadrant-4 arm. Concentric with the arm. The rim-ward
+// end is a Z-cylinder of the inner-rim curve, short of the hoop. The back
+// opening continues hub-ward through the dish so the mouth is wide enough.
 module feed_void() {
     th = 270;
-    rad = arm_radial(th);
-    if (rear_box) {
-        intersection() {
-            arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 4);
-            translate([0, 0, -500])
-                cylinder(h=1000, r=feed_inner_r() - 0.2, $fn=shell_fn);
-        }
-    } else {
-        arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 0);
-        r0 = dish_r - rim_width - 4;
-        r1 = dish_r - arm_wall;
-        intersection() {
-            frame_cube(
-                [((r0 + r1) / 2) * rad[0], ((r0 + r1) / 2) * rad[1], z_of(dish_r) - arm_height / 2],
-                rad, arm_az(th), [0, 0, 1],
-                [r1 - r0, feed_bore_width, feed_bore_height]
-            );
-            para_slab(0, rim_back_t + arm_height / 2);
-        }
+    intersection() {
+        arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 2);
+        translate([0, 0, -500])
+            cylinder(h=1000, r=feed_bore_r1(), $fn=shell_fn);
     }
+    para_layer(skin_thickness, honeycomb_back + arm_height)
+        feed_mouth_2d(0, feed_bore_width / 2);
 }
 
 // Rounded square of half-width `half`.
@@ -789,26 +877,21 @@ module rear_box_pilots() {
             cylinder(h=pilot_depth + 0.1, d=pilot_d, $fn=24);
 }
 
-// Raspberry Pi mounting posts in the rear-box cavity.
+// Raspberry Pi posts: parallel +Z cylinders. Free ends share a plane facing the
+// hatch. Each post is pi_standoff_h plus the extra to reach its dish-side wall,
+// so changing the slider shortens or lengthens every post by the same amount.
 module pi_standoffs() {
-    for (sx = [-1, 1], sy = [-1, 1])
-        translate([
-            pi_cx() + sx * pi_hole_span_x / 2,
-            pi_cy() + sy * pi_hole_span_y / 2,
-            0
-        ])
-            difference() {
-                intersection() {
-                    translate([0, 0, pi_z_top()])
-                        cylinder(h=rear_z_top() - pi_z_top(), d=pi_standoff_d, $fn=24);
-                    para_slab(
-                        rear_front_t - 0.4,
-                        honeycomb_back + rear_box_depth + 80
-                    );
-                }
-                translate([0, 0, pi_z_top() - 0.05])
-                    cylinder(h=pi_standoff_h + 0.05, d=pi_pilot_d, $fn=20);
-            }
+    zb = pi_board_z();
+    for (sx = [-1, 1], sy = [-1, 1]) {
+        p = pi_hole_xy(sx, sy);
+        h = pi_post_len(sx, sy);
+        difference() {
+            translate([p[0], p[1], zb])
+                cylinder(h=h + 1, d=pi_standoff_d, $fn=24);
+            translate([p[0], p[1], zb - 0.05])
+                cylinder(h=pi_standoff_h + 0.6, d=pi_pilot_d, $fn=20);
+        }
+    }
 }
 
 // Rear Pi box: prism to the rim arc, hatch in the back wall, bosses, and Pi posts.
@@ -835,7 +918,8 @@ module rear_box_body() {
                         rear_hatch_2d();
             }
             rear_box_bosses();
-            pi_standoffs();
+            if (pi_mount)
+                pi_standoffs();
         }
         rear_box_pilots();
     }
@@ -970,35 +1054,41 @@ module edge_binding(q, bed) {
         );
 }
 
-function spline_t_mid() = honeycomb_back / 2;
-function spline_r0() = hub_radius + 4;
-function spline_r1() = dish_r - rim_width - 2;
-
-// Tongue on the upright cut, centered in the honeycomb fill.
-module upright_spline(q) {
-    tm = spline_t_mid();
-    para_layer(tm - spline_t / 2, tm + spline_t / 2)
-        edge_strip_ring_2d(q, false, -spline_h, spline_embed, spline_r0(), spline_r1());
+// Half-lap footprint along one cut. Stops short of the hub, rim hoop, and rear box.
+module lap_zone_2d(q, bed, d0, d1) {
+    difference() {
+        edge_strip_ring_2d(q, bed, d0, d1, lap_r0(), lap_r1());
+        if (rear_box)
+            offset(delta = lap_keep)
+                rear_box_2d();
+    }
 }
 
-// Matching slot in the bed-side fill, with clearance around the tongue.
-module bed_slot(q) {
-    tm = spline_t_mid();
-    para_layer(
-        tm - spline_t / 2 - spline_clear_t,
-        tm + spline_t / 2 + spline_clear_t
-    )
-        edge_strip_ring_2d(
-            q, true, -0.2, spline_h + spline_clear_h,
-            spline_r0() - 1, spline_r1() + 1
-        );
+// Rear half of the bed strip, cut away so the upright lap can sit in it.
+module bed_rabbet(q) {
+    para_layer(lap_t - lap_clear, honeycomb_back + 2)
+        lap_zone_2d(q, true, -0.2, lap_w + lap_clear);
 }
 
-// Bed and upright honeycomb fills plus the upright spline for one quadrant.
-module quadrant_seams(q) {
-    edge_binding(q, true);
-    edge_binding(q, false);
-    upright_spline(q);
+// Rear half of the upright strip, extended into the bed rabbet.
+module upright_lap(q) {
+    para_layer(lap_t, honeycomb_back)
+        lap_zone_2d(q, false, -lap_w, 0.2);
+}
+
+module seam_insert_at(p) {
+    r = sqrt(p[0] * p[0] + p[1] * p[1]);
+    z_face = z_of(r) - lap_t;
+    translate([p[0], p[1], z_face - 0.2])
+        cylinder(h=seam_insert_h() + 0.2, d=seam_insert_d(), $fn=24);
+}
+
+module seam_through_at(p) {
+    r = sqrt(p[0] * p[0] + p[1] * p[1]);
+    z_back = z_of(r) - honeycomb_back;
+    z_face = z_of(r) - lap_t;
+    translate([p[0], p[1], z_back - 4])
+        cylinder(h=z_face - z_back + 4.2, d=seam_bolt_hole(), $fn=24);
 }
 
 module assembly_bindings() {
@@ -1011,28 +1101,22 @@ module assembly_bindings() {
         }
 }
 
-module assembly_splines() {
-    tm = spline_t_mid();
-    para_layer(tm - spline_t / 2, tm + spline_t / 2)
-        union() {
-            for (q = [0:3])
-                edge_strip_ring_2d(q, false, -spline_h, spline_embed, spline_r0(), spline_r1());
-        }
+module assembly_rabbets() {
+    for (q = [0:3])
+        bed_rabbet(q);
 }
 
-module assembly_slots() {
-    tm = spline_t_mid();
-    para_layer(
-        tm - spline_t / 2 - spline_clear_t,
-        tm + spline_t / 2 + spline_clear_t
-    )
-        union() {
-            for (q = [0:3])
-                edge_strip_ring_2d(
-                    q, true, -0.2, spline_h + spline_clear_h,
-                    spline_r0() - 1, spline_r1() + 1
-                );
-        }
+module assembly_upright_laps() {
+    for (q = [0:3])
+        upright_lap(q);
+}
+
+module assembly_fasteners() {
+    for (q = [0:3], i = [0:seam_n - 1]) {
+        p = seam_bolt_xy(q, i);
+        seam_insert_at(p);
+        seam_through_at(p);
+    }
 }
 
 function bolt_xy(i) = let(a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
@@ -1090,11 +1174,16 @@ module quadrant_raw(q) {
                         quadrant_region(q);
                         arm_solid(th);
                     }
-                    quadrant_seams(q);
+                    if (q == 3)
+                        feed_mouth_walls();
+                    edge_binding(q, true);
+                    edge_binding(q, false);
                 }
                 if (rear_box)
                     rear_box_cavity();
+                bed_rabbet(q);
             }
+            upright_lap(q);
             if (rear_box)
                 intersection() {
                     quadrant_region(q);
@@ -1102,7 +1191,10 @@ module quadrant_raw(q) {
                 }
         }
         hub_bolt_holes();
-        bed_slot(q);
+        for (i = [0:seam_n - 1]) {
+            seam_insert_at(seam_bolt_xy(q, i));
+            seam_through_at(seam_bolt_xy((q + 1) % 4, i));
+        }
         if (q == 3) feed_void();
     }
 }
@@ -1181,12 +1273,14 @@ module assembly() {
                 union() {
                     dish_body();
                     arms_solid();
+                    feed_mouth_walls();
                     assembly_bindings();
-                    assembly_splines();
                 }
                 if (rear_box)
                     rear_box_cavity();
+                assembly_rabbets();
             }
+            assembly_upright_laps();
             enclosure_world();
             if (rear_box)
                 rear_box_body();
@@ -1194,7 +1288,7 @@ module assembly() {
         feed_void();
         key_void();
         hub_bolt_holes();
-        assembly_slots();
+        assembly_fasteners();
     }
     place_front_lid();
     place_back_lid();
