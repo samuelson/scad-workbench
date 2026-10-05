@@ -5,12 +5,14 @@
 // Vertex at the origin, opening toward +Z, focus at z = focal_length.
 // Structure sits behind the paraboloid (toward -Z). No mesh or metal in the
 // model. Seven identical radial ribs, one rib with a Z-axis arm mount, and
-// eight identical rim arcs bolt to a one-piece hub. A hollow feed arm sleeves
-// the mount and carries cables to a focus-centered box with two lids. A pole
-// bracket bolts to the hub back with four screws and hose-clamps to a mast.
+// eight identical rim arcs bolt to a one-piece hub. Thin strips print straight
+// and bow into slots cut perpendicular to the dish face, carrying stainless
+// mesh on the paraboloid. A hollow feed arm sleeves the mount and carries
+// cables to a focus-centered box with two lids. A pole bracket bolts to the
+// hub back with four screws and hose-clamps to a mast.
 
 /* [Selection] */
-part = "assembly"; // [assembly, hub, radial_rib, radial_rib_mount, rim_segment, feed_arm, enclosure_body, radome_lid, reflector_lid, gasket, pole_bracket]
+part = "assembly"; // [assembly, hub, radial_rib, radial_rib_mount, rim_segment, mesh_hoop, feed_arm, enclosure_body, radome_lid, reflector_lid, gasket, pole_bracket]
 fast_preview = true;
 
 /* [Dish] */
@@ -26,6 +28,12 @@ rim_h = 8; // [6:0.5:16]
 lap_w = 16; // [12:0.5:28]
 lap_clear = 0.25; // [0.1:0.05:0.6]
 printer_bed_mm = 256; // [180:1:400]
+
+/* [Mesh hoops] */
+hoop_count = 2; // [0:1:8]
+hoop_index = 0; // [0:1:7]
+hoop_w = 6; // [3:0.5:12]
+hoop_t = 1.2; // [0.8:0.1:4]
 
 /* [Feed arm] */
 arm_along = 28; // [22:0.5:50]
@@ -102,6 +110,7 @@ boot_across_id = arm_across + 2 * arm_slip;
 boot_along_od = boot_along_id + 2 * arm_wall;
 boot_across_od = boot_across_id + 2 * arm_wall;
 rib_w = boot_across_od;
+hoop_clip = 5;
 rim_bolt_off = min(4, rib_w / 2 - bolt_hole / 2 - 1.6);
 sock_along_id = boot_along_od + 2 * arm_slip;
 sock_across_id = boot_across_od + 2 * arm_slip;
@@ -125,12 +134,18 @@ p_enc = [face_x, 0, p_knee[2] + enc_meet_dx * tan(arm_ang)];
 arm_dx = p_enc[0] - p_knee[0];
 arm_dz = p_enc[2] - p_knee[2];
 arm_len = sqrt(arm_dx * arm_dx + arm_dz * arm_dz);
+arm_elbow_s = (boot_along_od / 2) * (1 - sin(arm_ang)) / cos(arm_ang);
+z_elbow = p_knee[2] + (boot_along_od / 2) * (sin(arm_ang) - 1) / cos(arm_ang);
+arm_elbow_s_id = (boot_along_id / 2) * (1 - sin(arm_ang)) / cos(arm_ang);
+z_elbow_id = p_knee[2] + (boot_along_id / 2) * (sin(arm_ang) - 1) / cos(arm_ang);
 groove_outer_x = enclosure_x / 2 + gasket_lip + groove_w;
 groove_outer_y = enclosure_y / 2 + gasket_lip + groove_w;
 bolt_x = groove_outer_x + gasket_land + bolt_hole / 2;
 bolt_y = groove_outer_y + gasket_land + bolt_hole / 2;
 arm_insert_s = arm_len - socket_len + arm_end_keep;
 z_mount_rim = (r_mount + arm_along / 2) * (r_mount + arm_along / 2) / (4 * focal_length);
+z_mount_top_rim = z_mount_face + mount_h;
+z_mount_top_hub = z_mount_top_rim - arm_along * tan(arm_ang);
 mount_insert_z = (z_mount_rim + z_mount_face + mount_h) / 2;
 miter_skew = (boot_along_od / 2) * abs(arm_dz / arm_dx);
 flange_t = 8;
@@ -163,13 +178,32 @@ function hub_print_h() = hub_t + z_of(hub_r);
 function rib_print_x() = rib_r1 - rib_r0;
 function rib_print_y() = z_of(rib_r1) - (z_of(rib_r0) - rib_h);
 function rib_mount_print_y() =
-    max(z_of(rib_r1), z_mount_face + mount_h) - (z_of(rib_r0) - rib_h);
+    max(z_of(rib_r1), z_mount_top_hub) - (z_of(rib_r0) - rib_h);
+function z_mount_top(x) =
+    z_mount_top_rim + (x - r_mount - arm_along / 2) * tan(arm_ang);
 function rim_print_x() = dish_r - rim_r0 * cos(rim_half_ang);
 function rim_print_y() = 2 * dish_r * sin(rim_half_ang);
 function rim_insert_t() = z_of(rim_hole_r) - z_floor;
 function feed_arm_print_x() = r_mount + boot_along_od / 2 - face_x + 4;
 function lid_outer_x() = 2 * max(enclosure_x / 2 + enc_wall, bolt_x + boss_r);
 function lid_outer_y() = 2 * max(enclosure_y / 2 + enc_wall, bolt_y + boss_r);
+function rib_s(r) =
+    let (a = 2 * focal_length, u = r / a, n = sqrt(1 + u * u))
+        r / 2 * n + a / 2 * ln(u + n);
+
+function hoop_r_at_s(s, r = (hub_r + rim_r0) / 2, n = 8) =
+    n <= 0 ? r :
+    let (r2 = r - (rib_s(r) - s) / sqrt(1 + pow(r / (2 * focal_length), 2)))
+        hoop_r_at_s(s, r2, n - 1);
+
+function hoop_r(i) =
+    let (s0 = rib_s(hub_r), s1 = rib_s(rim_r0))
+        hoop_r_at_s(s0 + (s1 - s0) * (i + 1) / (hoop_count + 1));
+function hoop_az_face(r) = asin((rib_w / 2) / r);
+function hoop_span(r) = 360 / n_ribs - 2 * hoop_az_face(r);
+function hoop_len(r) = r * hoop_span(r) * 3.141592653589793 / 180 + 2 * hoop_clip;
+function hoop_print_x() = hoop_len(hoop_r(hoop_index));
+function hoop_print_y() = hoop_w;
 function bolt_xy(i) = let (a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
 function pole_insert_d() = bolt_d <= 3.2 ? 4.0 : (bolt_d <= 4.2 ? 5.6 : 6.5);
 function hub_pole_recess_d() =
@@ -239,7 +273,7 @@ assert(mount_h > z_mount_rim - z_mount_face + 2 * fastener_clear, "Arm mount is 
 assert(socket_len > arm_end_keep + miter_skew + fastener_clear, "Enclosure socket is too short for the bolts");
 assert(arm_insert_off + insert_d / 2 + 0.6 < boot_along_od / 2, "Arm insert breaks out of the along wall");
 assert(pad_len < boot_across_id - 2, "Insert pad closes the feed arm");
-assert(mount_insert_z - z_mount_face < mount_h - fastener_clear, "Mount insert is too close to the top");
+assert(mount_insert_z < z_mount_top(r_mount + mount_insert_off) - fastener_clear, "Mount insert is too close to the top");
 assert(mount_insert_z > z_mount_rim + fastener_clear, "Mount insert is too close to the dish");
 assert(bolt_circle_r + hub_pole_pocket_r() + 1.6 < rib_r0, "Pole bolts hit the rib laps");
 assert(bolt_circle_r - hub_pole_pocket_r() > 4, "Pole bolts are too close to the hub axis");
@@ -266,8 +300,55 @@ assert(hub_pole_face != "insert" || hub_pole_seat_h > 2.4, "Pole insert is too s
 assert(pole_print_x() <= printer_bed_mm, "Pole bracket is wider than the printer");
 assert(pole_print_y() <= printer_bed_mm, "Pole bracket is longer than the printer");
 assert(pole_print_z() <= printer_bed_mm, "Pole bracket is taller than the printer");
+assert(hoop_count == 0 || hoop_w < rib_h - 2, "Mesh hoop is wider than the rib");
+assert(hoop_count == 0 || hoop_clip + 2 < rib_w / 2, "Mesh hoop slot meets in the rib");
+assert(hoop_count == 0 || hoop_index < hoop_count, "Mesh hoop index is out of range");
+assert(hoop_count == 0 || hoop_r(hoop_index) > rib_w / 2 + hoop_clip + 1, "Mesh hoop is inside the rib width");
+assert(hoop_count == 0 || hoop_print_x() <= printer_bed_mm, "Mesh hoop is longer than the printer");
+assert(hoop_count == 0 || hoop_print_y() <= printer_bed_mm, "Mesh hoop is wider than the printer");
 if (clamp_pitch < min_clamp_pitch)
     echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
+
+module hoop_slot_2d(r) {
+    translate([r, z_of(r)])
+        rotate([0, 0, atan(r / (2 * focal_length))])
+            translate([-hoop_t / 2 - lap_clear, -hoop_w])
+                square([hoop_t + 2 * lap_clear, hoop_w + 0.4]);
+}
+
+module hoop_slots() {
+    for (i = [0:hoop_count - 1]) {
+        r = hoop_r(i);
+        for (s = [0, 1])
+            translate([0, 0, s == 0 ? -eps : rib_w - hoop_clip])
+                linear_extrude(hoop_clip + eps)
+                    hoop_slot_2d(r);
+    }
+}
+
+module hoop_profile_2d(r) {
+    translate([r, z_of(r)])
+        rotate([0, 0, atan(r / (2 * focal_length))])
+            translate([-hoop_t / 2, -hoop_w])
+                square([hoop_t, hoop_w]);
+}
+
+module hoop_segment(r) {
+    a_in = hoop_clip / r * 180 / 3.141592653589793;
+    rotate([0, 0, hoop_az_face(r) - a_in])
+        rotate_extrude(angle=hoop_span(r) + 2 * a_in, convexity=4)
+            hoop_profile_2d(r);
+}
+
+module hoop_print() {
+    cube([hoop_len(hoop_r(hoop_index)), hoop_w, hoop_t]);
+}
+
+module place_hoop(i, az) {
+    r = hoop_r(i);
+    rotate([0, 0, az])
+        hoop_segment(r);
+}
 
 module insert_bore() {
     cylinder(h=insert_h + 0.2, d=insert_d, $fn=24);
@@ -322,12 +403,21 @@ module radial_rib() {
             translate([rim_hole_r, z_of(rim_hole_r) - rib_h - 1, rib_w / 2 + s * rim_bolt_off])
                 rotate([-90, 0, 0])
                     through_bore(z_floor - (z_of(rim_hole_r) - rib_h) + 2);
+        if (hoop_count > 0)
+            hoop_slots();
     }
 }
 
 module mount_prism(along, across, z0, z1) {
     translate([r_mount - along / 2, z0, rib_w / 2 - across / 2])
         cube([along, z1 - z0, across]);
+}
+
+module mount_top_clip() {
+    translate([r_mount + arm_along / 2, z_mount_top_rim, -1])
+        rotate([0, 0, arm_ang])
+            translate([-200, -400, 0])
+                cube([400, 400, rib_w + 2]);
 }
 
 module mount_insert_pads() {
@@ -372,15 +462,18 @@ module mount_inserts() {
 }
 
 module radial_rib_mount() {
-    z0 = z_mount_face - rib_h - eps;
-    z1 = z_mount_face + mount_h + eps;
+    z0 = z_mount_rim - rib_h;
+    z1 = z_mount_top_hub + eps;
     z_bore0 = z_of(r_mount - arm_along / 2) - rib_h - 2;
     difference() {
         union() {
             difference() {
                 union() {
                     radial_rib();
-                    mount_prism(arm_along, arm_across, z0, z1);
+                    difference() {
+                        mount_prism(arm_along, arm_across, z0, z1);
+                        mount_top_clip();
+                    }
                 }
                 mount_prism(mount_along_id, mount_across_id, z_bore0, z1 + 1);
             }
@@ -587,32 +680,32 @@ module z_rect(ax, ay, z0, z1) {
         cube([ax, ay, z1 - z0]);
 }
 
+module arm_rimward_clip(along) {
+    translate([r_mount + along / 2, -200, -200])
+        cube([400, 400, 400]);
+}
+
 module arm_outer() {
     union() {
-        z_rect(boot_along_od, boot_across_od, z_mount_face - 4, p_knee[2] + 0.2);
-        hull() {
-            translate([r_mount, 0, p_knee[2]])
-                cube([boot_along_od, boot_across_od, 0.4], center=true);
+        z_rect(boot_along_od, boot_across_od, z_mount_face - 4, z_elbow + eps);
+        difference() {
             along_arm()
-                rect_x(0.4, boot_across_od, boot_along_od);
+                translate([arm_elbow_s - 1, 0, 0])
+                    rect_x(arm_len - arm_elbow_s + 8, boot_across_od, boot_along_od);
+            arm_rimward_clip(boot_along_od);
         }
-        along_arm()
-            rect_x(arm_len + 6, boot_across_od, boot_along_od);
     }
 }
 
 module arm_inner() {
     union() {
-        z_rect(boot_along_id, boot_across_id, z_mount_face - 6, p_knee[2] + 1);
-        hull() {
-            translate([r_mount, 0, p_knee[2]])
-                cube([boot_along_id, boot_across_id, 0.4], center=true);
+        z_rect(boot_along_id, boot_across_id, z_mount_face - 6, z_elbow_id + eps);
+        difference() {
             along_arm()
-                rect_x(0.4, boot_across_id, boot_along_id);
+                translate([arm_elbow_s_id - 1, 0, 0])
+                    rect_x(arm_len - arm_elbow_s_id + 9, boot_across_id, boot_along_id);
+            arm_rimward_clip(boot_along_id);
         }
-        along_arm()
-            translate([-1, 0, 0])
-                rect_x(arm_len + 8, boot_across_id, boot_along_id);
     }
 }
 
@@ -851,6 +944,9 @@ module assembly() {
         else
             place_rib(i * 360 / n_ribs);
         place_rim(i * 360 / n_ribs);
+        if (hoop_count > 0)
+            for (h = [0:hoop_count - 1])
+                place_hoop(h, i * 360 / n_ribs);
     }
     feed_arm();
     place_enclosure();
@@ -868,6 +964,8 @@ else if (part == "radial_rib_mount")
     radial_rib_mount();
 else if (part == "rim_segment")
     rim_print();
+else if (part == "mesh_hoop")
+    hoop_print();
 else if (part == "feed_arm")
     feed_arm_print();
 else if (part == "enclosure_body")
