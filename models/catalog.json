@@ -5,6 +5,11 @@
     "path": "./models/58ghz_mesh_dish.scad"
   },
   {
+    "name": "5.8 GHz rib dish",
+    "description": "400 mm prime-focus rib frame · 15 mm hub and ribs",
+    "path": "./models/58ghz_rib_dish.scad"
+  },
+  {
     "name": "915mhz circular slotted waveguide",
     "description": "",
     "path": "./models/915mhz_circular_slotted_waveguide.scad"
