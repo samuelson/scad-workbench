@@ -16,6 +16,7 @@ const state = {
   edited: false,
   codeOpen: false,
   libraryOpen: false,
+  editorOpen: true,
 };
 
 let worker = null;
@@ -28,7 +29,10 @@ const els = {
   openShelf: document.getElementById("open-file-shelf"),
   fileInput: document.getElementById("file-input"),
   workspace: document.querySelector(".workspace"),
+  editorResize: document.getElementById("editor-resize"),
+  shelfResize: document.getElementById("shelf-resize"),
   libraryToggle: document.getElementById("library-toggle"),
+  editorToggle: document.getElementById("editor-toggle"),
   modelCount: document.getElementById("model-count"),
   modelList: document.getElementById("model-list"),
   filePill: document.getElementById("file-pill"),
@@ -272,9 +276,119 @@ function fileLabel() {
   return state.name.endsWith(".scad") ? state.name : `${state.name.toLowerCase().replaceAll(" ", "-")}.scad`;
 }
 
+function panelResizeEnabled() {
+  return window.matchMedia("(min-width: 851px)").matches;
+}
+
+function layoutMins() {
+  const compact = window.matchMedia("(max-width: 1150px)").matches;
+  return {
+    minEditor: compact ? 150 : 160,
+    minShelf: compact ? 180 : 200,
+    minPreview: compact ? 330 : 360,
+    collapsed: compact ? 48 : 52,
+  };
+}
+
+function currentEditorWidth() {
+  return els.workspace.querySelector(".editor-panel").getBoundingClientRect().width;
+}
+
+function currentShelfWidth() {
+  return els.workspace.querySelector(".shelf").getBoundingClientRect().width;
+}
+
+function otherColumnWidth(kind) {
+  const { collapsed } = layoutMins();
+  if (kind === "shelf") return state.editorOpen ? currentEditorWidth() : collapsed;
+  return state.libraryOpen ? currentShelfWidth() : collapsed;
+}
+
+function clampPanelWidth(kind, width) {
+  const { minEditor, minShelf, minPreview } = layoutMins();
+  const minThis = kind === "shelf" ? minShelf : minEditor;
+  const workspace = els.workspace.getBoundingClientRect().width;
+  const maxThis = Math.max(minThis, workspace - otherColumnWidth(kind) - minPreview);
+  return Math.min(maxThis, Math.max(minThis, width));
+}
+
+function setPanelWidth(kind, width) {
+  const next = Math.round(clampPanelWidth(kind, width));
+  const handle = kind === "shelf" ? els.shelfResize : els.editorResize;
+  const property = kind === "shelf" ? "--shelf-width" : "--editor-width";
+  els.workspace.style.setProperty(property, `${next}px`);
+  handle.setAttribute("aria-valuemin", String(kind === "shelf" ? layoutMins().minShelf : layoutMins().minEditor));
+  handle.setAttribute("aria-valuemax", String(Math.round(clampPanelWidth(kind, 1e9))));
+  handle.setAttribute("aria-valuenow", String(next));
+}
+
+function applyPanelWidths() {
+  if (!panelResizeEnabled()) return;
+  if (state.libraryOpen && els.workspace.style.getPropertyValue("--shelf-width")) setPanelWidth("shelf", currentShelfWidth());
+  if (state.editorOpen && els.workspace.style.getPropertyValue("--editor-width")) setPanelWidth("editor", currentEditorWidth());
+}
+
+function bindColumnResize(kind) {
+  const handle = kind === "shelf" ? els.shelfResize : els.editorResize;
+  const className = kind === "shelf" ? "resizing-shelf" : "resizing-editor";
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  const onMove = (event) => {
+    if (!dragging) return;
+    setPanelWidth(kind, startWidth + (event.clientX - startX));
+  };
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false;
+    els.workspace.classList.remove(className);
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (!panelResizeEnabled() || event.button !== 0) return;
+    if (kind === "shelf" && !state.libraryOpen) return;
+    if (kind === "editor" && !state.editorOpen) return;
+    dragging = true;
+    startX = event.clientX;
+    startWidth = kind === "shelf" ? currentShelfWidth() : currentEditorWidth();
+    els.workspace.classList.add(className);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    try { handle.setPointerCapture(event.pointerId); } catch {}
+    event.preventDefault();
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (!panelResizeEnabled()) return;
+    if (kind === "shelf" && !state.libraryOpen) return;
+    if (kind === "editor" && !state.editorOpen) return;
+    const step = event.shiftKey ? 48 : 16;
+    const current = kind === "shelf" ? currentShelfWidth() : currentEditorWidth();
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setPanelWidth(kind, current - step);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setPanelWidth(kind, current + step);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setPanelWidth(kind, 150);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setPanelWidth(kind, 1e9);
+    }
+  });
+}
+
 function sync({ skipParameters = false } = {}) {
   els.workspace.classList.toggle("library-open", state.libraryOpen);
+  els.workspace.classList.toggle("editor-open", state.editorOpen);
   els.libraryToggle.setAttribute("aria-expanded", String(state.libraryOpen));
+  els.editorToggle.setAttribute("aria-expanded", String(state.editorOpen));
   els.filePill.textContent = state.active < 0 ? "LOCAL FILE" : "LIBRARY FILE";
   els.fileName.textContent = fileLabel();
   els.editDot.hidden = !state.edited;
@@ -301,6 +415,7 @@ function sync({ skipParameters = false } = {}) {
     lastParamSource = state.source;
     syncParameters();
   }
+  applyPanelWidths();
   viewer.set(state.stl, state.resetKey);
 }
 
@@ -440,6 +555,10 @@ els.libraryToggle.addEventListener("click", () => {
   state.libraryOpen = !state.libraryOpen;
   sync();
 });
+els.editorToggle.addEventListener("click", () => {
+  state.editorOpen = !state.editorOpen;
+  sync();
+});
 els.codeToggle.addEventListener("click", () => {
   state.codeOpen = !state.codeOpen;
   sync();
@@ -455,6 +574,9 @@ els.dismissError.addEventListener("click", () => {
   state.error = "";
   sync();
 });
+bindColumnResize("shelf");
+bindColumnResize("editor");
+window.addEventListener("resize", applyPanelWidths);
 window.addEventListener("beforeunload", () => worker?.terminate());
 
 function registerHostTool() {
