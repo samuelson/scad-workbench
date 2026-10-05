@@ -101,7 +101,8 @@ hub_bolt_recess_size = 9; // [5:0.1:16]
 hub_bolt_recess_h = 3.2; // [0:0.1:8]
 
 /* [Hidden] */
-$fn = 64;
+$fa = 12;
+$fs = 1;
 
 feed_bore_height = arm_height - 2 * arm_wall;
 feed_bore_width = arm_width - 2 * arm_wall;
@@ -120,8 +121,9 @@ grid_pitch = fast_preview ? max(xy_pitch * 4, 18) : xy_pitch;
 grid_rib = fast_preview ? max(mesh_rib * 2, 2) : mesh_rib;
 shell_fn = fast_preview ? 48 : 96;
 shell_n = fast_preview ? 18 : 40;
-para_r_max = dish_r + 30;
-para_z_floor = -hub_thickness - 200;
+function para_r_max() = dish_r + 8;
+function para_z_floor() =
+    (rear_box ? min(-hub_thickness, rear_z_lid()) : -hub_thickness) - 8;
 
 inner_opening = enclosure_size - 16;
 gasket_half = enclosure_size / 2 - 5;
@@ -302,12 +304,10 @@ function vsub(a, b) = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 function vadd(a, b) = [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 function vmul(a, s) = [a[0] * s, a[1] * s, a[2] * s];
 function dot(a, b) = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-function cross(a, b) = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+function vcross(a, b) = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 function vnorm(a) = sqrt(dot(a, a));
 function unit(a) = vmul(a, 1 / vnorm(a));
 function rot_z(a, p) = [p[0] * cos(a) - p[1] * sin(a), p[0] * sin(a) + p[1] * cos(a), p[2]];
-function vmin(v, i = 0) = i + 1 >= len(v) ? v[i] : min(v[i], vmin(v, i + 1));
-function vmax(v, i = 0) = i + 1 >= len(v) ? v[i] : max(v[i], vmax(v, i + 1));
 
 function arm_theta(q) = q * 90;
 function rim_pt(th) = let(r = dish_r - rim_width / 2) [r * cos(th), r * sin(th), z_of(r)];
@@ -385,7 +385,7 @@ function bed_up(q) =
 
 function basis(q) =
     let(up = bed_up(q), by = [0, 0, 1])
-    [cross(by, up), by, up];
+    [vcross(by, up), by, up];
 
 function to_flat(q, p) =
     let(b = basis(q))
@@ -449,16 +449,18 @@ function quad_samples(q) =
     );
 
 function printed(q) = [for (p = quad_samples(q)) to_print(q, p)];
-function span_of(pts, idx) = vmax([for (p = pts) p[idx]]) - vmin([for (p = pts) p[idx]]);
-function min_z(q) = vmin([for (p = printed(q)) p[2]]);
+function span_of(pts, idx) = max([for (p = pts) p[idx]]) - min([for (p = pts) p[idx]]);
+function min_z(q) = min([for (p = printed(q)) p[2]]);
 
-// Solid on or below the inner face z = r²/(4f), out to para_r_max.
+// Solid on or below the inner face z = r²/(4f), out to para_r_max().
 // No render(): the workbench uses Manifold; render() forces CGAL and OOMs.
 module para_tool() {
+    rmax = para_r_max();
+    zfloor = para_z_floor();
     rotate_extrude($fn=shell_fn)
         polygon(concat(
-            [[0, para_z_floor], [para_r_max, para_z_floor], [para_r_max, z_of(para_r_max)]],
-            [for (i = [shell_n:-1:0]) let(r = para_r_max * i / shell_n) [r, z_of(r)]]
+            [[0, zfloor], [rmax, zfloor], [rmax, z_of(rmax)]],
+            [for (i = [shell_n:-1:0]) let(r = rmax * i / shell_n) [r, z_of(r)]]
         ));
 }
 
@@ -490,68 +492,99 @@ module annulus_2d(r0, r1) {
     }
 }
 
-// Top-down hex holes. circle $fn=6 is vertex-to-vertex; pitch is center-to-center.
-module hex_2d(pitch, rib, r) {
-    c = pitch;
-    r_hole = (pitch - rib) / sqrt(3);
-    n = ceil(2 * r / c) + 2;
-    for (q = [-n:n], s = [-n:n]) {
-        x = c * sqrt(3) / 2 * q;
-        y = c * (s + q * 0.5);
-        if (x * x + y * y <= (r + c) * (r + c))
-            translate([x, y])
-                circle(r=r_hole, $fn=6);
-    }
+// XY of one print quadrant, grown so 2D ribs are not clipped on the cut.
+module quadrant_xy_2d(q, grow = 1) {
+    a = arm_width / 2;
+    span = rim_xy + a + 4;
+    if (q == 0) translate([a - grow, -a - grow]) square([span + grow, span + 2 * grow]);
+    else if (q == 1) translate([a - span, a - grow]) square([span + grow, span + 2 * grow]);
+    else if (q == 2) translate([-a - span, a - span]) square([span + grow, span + 2 * grow]);
+    else translate([-a - grow, -a - span]) square([span + 2 * grow, span + grow]);
 }
 
-// Annulus minus hexes. Holes that straddle hub or rim are clipped, not dropped.
-module hex_annulus_2d(r0, r1, pitch, rib) {
-    difference() {
+module dish_2d(q) {
+    if (q < 0)
+        children();
+    else
+        intersection() {
+            quadrant_xy_2d(q);
+            children();
+        }
+}
+
+// Hex ribs: union of three stripe families. Flat-to-flat opening is pitch - rib.
+module hex_stripes_2d(pitch, rib, r) {
+    n = ceil(2 * r / pitch) + 2;
+    half = r + pitch;
+    for (a = [0, 60, 120])
+        rotate(a)
+            for (i = [-n:n])
+                translate([0, (i + 0.5) * pitch])
+                    square([2 * half, rib], center=true);
+}
+
+// Annulus ∩ hex ribs. Holes that straddle hub or rim are clipped, not dropped.
+module hex_annulus_2d(r0, r1, pitch, rib, q = -1) {
+    intersection() {
         annulus_2d(r0, r1);
-        hex_2d(pitch, rib, r1 + pitch);
+        hex_stripes_2d(pitch, rib, r1 + pitch);
+        if (q >= 0)
+            quadrant_xy_2d(q);
     }
 }
 
 // Hex-perforated front skin of the reflector, between hub and rim.
-module mesh_skin() {
+module mesh_skin(q = -1) {
     para_layer(0, skin_thickness)
-        hex_annulus_2d(hub_radius - 2, dish_r - rim_width + 2, grid_pitch, grid_rib);
+        hex_annulus_2d(hub_radius - 2, dish_r - rim_width + 2, grid_pitch, grid_rib, q);
 }
 
 // Honeycomb backing behind the skin, stopping inside the rim hoop.
-module honeycomb() {
+module honeycomb(q = -1) {
     para_layer(0.5, honeycomb_back)
-        hex_annulus_2d(hub_radius - 2, dish_r - rim_width + 1, honeycomb_pitch, honeycomb_rib);
+        hex_annulus_2d(hub_radius - 2, dish_r - rim_width + 1, honeycomb_pitch, honeycomb_rib, q);
 }
 
 // Solid band over the hub edge, behind the front surface. Mesh ribs end here.
-module hub_weld() {
+module hub_weld(q = -1) {
     para_layer(0.5, honeycomb_back + 1)
-        annulus_2d(hub_radius - 8, hub_radius + 4);
+        dish_2d(q)
+            annulus_2d(hub_radius - 8, hub_radius + 4);
 }
 
 // Outer rim hoop. Starts 0.3 mm proud of the mesh so the join is not coplanar.
-module rim_hoop() {
+module rim_hoop(q = -1) {
     para_layer(-0.3, rim_back_t)
-        annulus_2d(dish_r - rim_width, dish_r);
+        dish_2d(q)
+            annulus_2d(dish_r - rim_width, dish_r);
 }
 
 // Flat hub disk on the back, plus a parabolic fill up to the inner face.
-module hub_pad() {
-    translate([0, 0, -hub_thickness])
-        cylinder(r=hub_radius, h=hub_thickness + 0.2, $fn=shell_fn);
-    para_layer(-0.3, hub_thickness)
-        circle(r=hub_radius + 3, $fn=shell_fn);
+module hub_pad(q = -1) {
+    module pad_solid() {
+        translate([0, 0, -hub_thickness])
+            cylinder(r=hub_radius, h=hub_thickness + 0.2, $fn=shell_fn);
+        para_layer(-0.3, hub_thickness)
+            dish_2d(q)
+                circle(r=hub_radius + 3, $fn=shell_fn);
+    }
+    if (q < 0)
+        pad_solid();
+    else
+        intersection() {
+            pad_solid();
+            quadrant_region(q);
+        }
 }
 
 // Full reflector: skin, honeycomb, rim, hub pad, and hub weld.
-module dish_body() {
+module dish_body(q = -1) {
     union() {
-        mesh_skin();
-        honeycomb();
-        rim_hoop();
-        hub_pad();
-        hub_weld();
+        mesh_skin(q);
+        honeycomb(q);
+        rim_hoop(q);
+        hub_pad(q);
+        hub_weld(q);
     }
 }
 
@@ -581,18 +614,25 @@ module frame_cube(origin, ux, uy, uz, size) {
             cube(size);
 }
 
+function clip_z0() = para_z_floor();
+function clip_h() = focal_length + enclosure_height - clip_z0() + 20;
+function clip_xy() = dish_r + enclosure_size;
+
 // Keeps the arm on the enclosure side of the feed-box face at this azimuth.
 module arm_clip(th) {
     overlap = 1.2;
     s = enclosure_size / 2 - overlap;
+    e = clip_xy();
+    z0 = clip_z0();
+    h = clip_h();
     if (th == 0)
-        translate([s, -500, -200]) cube([1000, 1000, 1000]);
+        translate([s, -e, z0]) cube([e, 2 * e, h]);
     else if (th == 90)
-        translate([-500, s, -200]) cube([1000, 1000, 1000]);
+        translate([-e, s, z0]) cube([2 * e, e, h]);
     else if (th == 180)
-        translate([-s - 1000, -500, -200]) cube([1000, 1000, 1000]);
+        translate([-s - e, -e, z0]) cube([e, 2 * e, h]);
     else
-        translate([-500, -s - 1000, -200]) cube([1000, 1000, 1000]);
+        translate([-e, -s - e, z0]) cube([2 * e, e, h]);
 }
 
 // Rectangular prism along the arm centerline from rim toward the enclosure.
@@ -608,8 +648,8 @@ module arm_blank(th, w, h, extra_encl, extra_rim) {
 
 // Limits the arm to the dish disk so it does not pass the hoop.
 module arm_rim_clip() {
-    translate([0, 0, -500])
-        cylinder(h=1000, r=dish_r, $fn=shell_fn);
+    translate([0, 0, clip_z0()])
+        cylinder(h=clip_h(), r=dish_r, $fn=shell_fn);
 }
 
 // Behind the vertical rim hoop only, not the whole dish back (that would
@@ -617,7 +657,7 @@ module arm_rim_clip() {
 module behind_dish_back() {
     intersection() {
         para_slab(rim_back_t, rim_back_t + 80);
-        translate([0, 0, para_z_floor])
+        translate([0, 0, para_z_floor()])
             linear_extrude(height=dish_depth + hub_thickness + 220)
                 annulus_2d(dish_r - rim_width - 12, dish_r + 8);
     }
@@ -686,8 +726,8 @@ module feed_void() {
     th = 270;
     intersection() {
         arm_blank(th, feed_bore_width, feed_bore_height, enclosure_wall + 10, 2);
-        translate([0, 0, -500])
-            cylinder(h=1000, r=feed_bore_r1(), $fn=shell_fn);
+        translate([0, 0, clip_z0()])
+            cylinder(h=clip_h(), r=feed_bore_r1(), $fn=shell_fn);
     }
     para_layer(skin_thickness, honeycomb_back + arm_height)
         feed_mouth_2d(0, feed_bore_width / 2);
@@ -986,16 +1026,7 @@ module place_gasket(s) {
 
 // The bed edge is the arm-side plane that sits on the printer. The other edge
 // is the neighbor's arm-side plane. Normals point into this quadrant.
-function edge_normal(q, bed) =
-    bed ? (
-        q == 0 ? [0, 1, 0] :
-        q == 1 ? [-1, 0, 0] :
-        q == 2 ? [0, -1, 0] : [1, 0, 0]
-    ) : (
-        q == 0 ? [1, 0, 0] :
-        q == 1 ? [0, 1, 0] :
-        q == 2 ? [-1, 0, 0] : [0, -1, 0]
-    );
+function edge_normal(q, bed) = bed ? bed_up(q) : bed_up((q + 3) % 4);
 
 function edge_tangent(q, bed) =
     bed ? (
@@ -1119,6 +1150,13 @@ module assembly_fasteners() {
     }
 }
 
+module seam_fasteners(q) {
+    for (i = [0:seam_n - 1]) {
+        seam_insert_at(seam_bolt_xy(q, i));
+        seam_through_at(seam_bolt_xy((q + 1) % 4, i));
+    }
+}
+
 function bolt_xy(i) = let(a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
 
 function hub_bolt_recess_d() =
@@ -1156,9 +1194,46 @@ module key_void() {
         cube([arm_width, arm_width, hub_thickness + 30]);
 }
 
+// Dish, arms, and feed-mouth walls. q < 0 is the full reflector.
+module dish_fill(q = -1) {
+    union() {
+        dish_body(q);
+        if (q < 0)
+            arms_solid();
+        else
+            arm_solid(arm_theta(q));
+        if (q < 0 || q == 3)
+            feed_mouth_walls();
+    }
+}
+
+module reflector_positive(q = -1) {
+    difference() {
+        union() {
+            dish_fill(q);
+            if (q < 0)
+                assembly_bindings();
+            else {
+                edge_binding(q, true);
+                edge_binding(q, false);
+            }
+        }
+        if (rear_box)
+            rear_box_cavity();
+        if (q < 0)
+            assembly_rabbets();
+        else
+            bed_rabbet(q);
+    }
+    if (q < 0)
+        assembly_upright_laps();
+    else
+        upright_lap(q);
+}
+
 // One quadrant in world coordinates, including its arm, seams, and rear box.
+// Bindings stay outside quadrant_region so the 0.2 mm upright overlap remains.
 module quadrant_raw(q) {
-    th = arm_theta(q);
     difference() {
         union() {
             difference() {
@@ -1166,16 +1241,10 @@ module quadrant_raw(q) {
                     intersection() {
                         quadrant_region(q);
                         union() {
-                            dish_body();
+                            dish_fill(q);
                             enclosure_world();
                         }
                     }
-                    intersection() {
-                        quadrant_region(q);
-                        arm_solid(th);
-                    }
-                    if (q == 3)
-                        feed_mouth_walls();
                     edge_binding(q, true);
                     edge_binding(q, false);
                 }
@@ -1191,11 +1260,9 @@ module quadrant_raw(q) {
                 }
         }
         hub_bolt_holes();
-        for (i = [0:seam_n - 1]) {
-            seam_insert_at(seam_bolt_xy(q, i));
-            seam_through_at(seam_bolt_xy((q + 1) % 4, i));
-        }
-        if (q == 3) feed_void();
+        seam_fasteners(q);
+        if (q == 3)
+            feed_void();
     }
 }
 
@@ -1269,18 +1336,7 @@ module pole_bracket_print() {
 module assembly() {
     difference() {
         union() {
-            difference() {
-                union() {
-                    dish_body();
-                    arms_solid();
-                    feed_mouth_walls();
-                    assembly_bindings();
-                }
-                if (rear_box)
-                    rear_box_cavity();
-                assembly_rabbets();
-            }
-            assembly_upright_laps();
+            reflector_positive(-1);
             enclosure_world();
             if (rear_box)
                 rear_box_body();
