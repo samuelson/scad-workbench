@@ -6,7 +6,7 @@
   },
   {
     "name": "5.8 GHz rib dish",
-    "description": "400 mm prime-focus rib frame · 15 mm hub and ribs",
+    "description": "400 mm prime-focus rib frame · feed arm · focal box",
     "path": "./models/58ghz_rib_dish.scad"
   },
   {
