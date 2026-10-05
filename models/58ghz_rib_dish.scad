@@ -6,10 +6,11 @@
 // Structure sits behind the paraboloid (toward -Z). No mesh or metal in the
 // model. Seven identical radial ribs, one rib with a Z-axis arm mount, and
 // eight identical rim arcs bolt to a one-piece hub. A hollow feed arm sleeves
-// the mount and carries cables to a focus-centered box with two lids.
+// the mount and carries cables to a focus-centered box with two lids. A pole
+// bracket bolts to the hub back with four screws and hose-clamps to a mast.
 
 /* [Selection] */
-part = "assembly"; // [assembly, hub, radial_rib, radial_rib_mount, rim_segment, feed_arm, enclosure_body, radome_lid, reflector_lid, gasket]
+part = "assembly"; // [assembly, hub, radial_rib, radial_rib_mount, rim_segment, feed_arm, enclosure_body, radome_lid, reflector_lid, gasket, pole_bracket]
 fast_preview = true;
 
 /* [Dish] */
@@ -45,6 +46,19 @@ gasket_w = 2.2; // [1.5:0.1:4]
 gasket_h = 2.2; // [1.6:0.1:4]
 groove_w = 2; // [1.4:0.1:3.5]
 groove_d = 1; // [0.6:0.1:1.6]
+
+/* [Pole bracket] */
+pole_diameter = 32; // [20:0.5:60]
+pole_clearance = 0.8; // [0.2:0.1:2]
+v_included = 120; // [60:1:130]
+clamp_band_width = 12.7; // [8:0.1:20]
+clamp_slot = 2.5; // [1.5:0.1:4]
+clamp_pitch = 72; // [50:1:140]
+bolt_d = 5; // [3:0.1:8]
+bolt_circle_r = 28; // [16:1:40]
+hub_pole_face = "through"; // [through:Through hole, round:Recessed round, hex:Recessed hex, insert:Threaded insert]
+hub_pole_seat_size = 9; // [5:0.1:16]
+hub_pole_seat_h = 3.2; // [0:0.1:10]
 
 /* [Hidden] */
 $fa = fast_preview ? 12 : 6;
@@ -119,6 +133,24 @@ arm_insert_s = arm_len - socket_len + arm_end_keep;
 z_mount_rim = (r_mount + arm_along / 2) * (r_mount + arm_along / 2) / (4 * focal_length);
 mount_insert_z = (z_mount_rim + z_mount_face + mount_h) / 2;
 miter_skew = (boot_along_od / 2) * abs(arm_dz / arm_dx);
+flange_t = 8;
+cheek_y = clamp_band_width + 6;
+pole_r = pole_diameter / 2 + pole_clearance;
+flange_back = -hub_t - flange_t;
+v_angle = v_included / 2;
+v_steps = 6;
+v_wall = 4;
+z_apex = flange_back;
+v_depth = pole_r / sin(v_angle);
+stair_x = v_depth * tan(v_angle) / v_steps;
+stair_z = v_depth / v_steps;
+pole_cz = z_apex - v_depth;
+cheek_back = pole_cz;
+v_half = v_steps * stair_x;
+min_clamp_pitch = 2 * (bolt_circle_r * sin(45) + bolt_d / 2 + 1) + cheek_y;
+station_pitch = max(clamp_pitch, min_clamp_pitch);
+flange_hx = max(v_half + v_wall, bolt_circle_r * cos(45) + bolt_d / 2 + 3);
+flange_hy = max(station_pitch / 2 + cheek_y / 2, bolt_circle_r * sin(45) + bolt_d / 2 + 3);
 
 function z_of(r) = r * r / (4 * focal_length);
 
@@ -138,6 +170,17 @@ function rim_insert_t() = z_of(rim_hole_r) - z_floor;
 function feed_arm_print_x() = r_mount + boot_along_od / 2 - face_x + 4;
 function lid_outer_x() = 2 * max(enclosure_x / 2 + enc_wall, bolt_x + boss_r);
 function lid_outer_y() = 2 * max(enclosure_y / 2 + enc_wall, bolt_y + boss_r);
+function bolt_xy(i) = let (a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
+function pole_insert_d() = bolt_d <= 3.2 ? 4.0 : (bolt_d <= 4.2 ? 5.6 : 6.5);
+function hub_pole_recess_d() =
+    hub_pole_face == "hex" ? hub_pole_seat_size / cos(30) : hub_pole_seat_size;
+function hub_pole_pocket_d() =
+    hub_pole_face == "insert" ? pole_insert_d() :
+        (hub_pole_face == "through" ? bolt_d : hub_pole_recess_d());
+function hub_pole_pocket_r() = hub_pole_pocket_d() / 2;
+function pole_print_x() = 2 * flange_hy;
+function pole_print_y() = 2 * flange_hx;
+function pole_print_z() = -cheek_back;
 
 echo(lambda_mm=lambda_mm, dish_depth_mm=dish_depth, f_D=f_D);
 echo(hub_od=hub_od, thickness=thickness, rim_w=rim_w, rim_h=rim_h);
@@ -198,6 +241,33 @@ assert(arm_insert_off + insert_d / 2 + 0.6 < boot_along_od / 2, "Arm insert brea
 assert(pad_len < boot_across_id - 2, "Insert pad closes the feed arm");
 assert(mount_insert_z - z_mount_face < mount_h - fastener_clear, "Mount insert is too close to the top");
 assert(mount_insert_z > z_mount_rim + fastener_clear, "Mount insert is too close to the dish");
+assert(bolt_circle_r + hub_pole_pocket_r() + 1.6 < rib_r0, "Pole bolts hit the rib laps");
+assert(bolt_circle_r - hub_pole_pocket_r() > 4, "Pole bolts are too close to the hub axis");
+assert(bolt_circle_r * cos(45) + bolt_d / 2 < flange_hx - 2, "Pole bolts leave the flange");
+assert(bolt_circle_r * sin(45) + bolt_d / 2 < flange_hy - 2, "Pole bolts leave the flange");
+assert(
+    hub_pole_face == "through"
+        || hub_pole_seat_h <= 0
+        || hub_pole_seat_h < z_of(max(bolt_circle_r - hub_pole_pocket_r(), 0)) + hub_t - 2,
+    "Pole seat goes through the hub"
+);
+assert(
+    hub_pole_face == "through"
+        || hub_pole_face == "insert"
+        || hub_pole_seat_h <= 0
+        || hub_pole_seat_size > bolt_d,
+    "Pole seat is smaller than the shank"
+);
+assert(
+    hub_pole_face != "insert" || pole_insert_d() > bolt_d,
+    "Pole insert is smaller than the shank"
+);
+assert(hub_pole_face != "insert" || hub_pole_seat_h > 2.4, "Pole insert is too shallow");
+assert(pole_print_x() <= printer_bed_mm, "Pole bracket is wider than the printer");
+assert(pole_print_y() <= printer_bed_mm, "Pole bracket is longer than the printer");
+assert(pole_print_z() <= printer_bed_mm, "Pole bracket is taller than the printer");
+if (clamp_pitch < min_clamp_pitch)
+    echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
 
 module insert_bore() {
     cylinder(h=insert_h + 0.2, d=insert_d, $fn=24);
@@ -367,12 +437,74 @@ module hub() {
                 hub_pocket();
                 hub_insert();
             }
+        hub_pole_holes();
     }
 }
 
 module hub_print() {
     translate([0, 0, hub_t])
         hub();
+}
+
+module hub_pole_seat_at(p) {
+    rr = hub_pole_pocket_r();
+    z_top = z_of(bolt_circle_r + rr) + 1;
+    z_bot = z_of(max(bolt_circle_r - rr, 0)) - hub_pole_seat_h;
+    translate([p[0], p[1], z_bot])
+        cylinder(
+            h=z_top - z_bot,
+            d=hub_pole_pocket_d(),
+            $fn=hub_pole_face == "hex" ? 6 : 24
+        );
+}
+
+module hub_pole_holes() {
+    for (i = [0:3]) {
+        p = bolt_xy(i);
+        translate([p[0], p[1], -hub_t - 1])
+            cylinder(h=hub_t + z_of(bolt_circle_r) + 4, d=bolt_d, $fn=24);
+        if (hub_pole_face != "through" && hub_pole_seat_h > 0)
+            hub_pole_seat_at(p);
+    }
+}
+
+module clamp_station(station_y) {
+    outer = v_half + v_wall;
+    for (i = [0:v_steps - 1]) {
+        z_top = z_apex - i * stair_z;
+        inner = (i + 1) * stair_x;
+        extra = i == 0 ? 0.2 : 0;
+        translate([-outer, station_y - cheek_y / 2, z_top - stair_z])
+            cube([outer - inner, cheek_y, stair_z + extra]);
+        translate([inner, station_y - cheek_y / 2, z_top - stair_z])
+            cube([outer - inner, cheek_y, stair_z + extra]);
+    }
+}
+
+module pole_bracket() {
+    rotate([0, 0, 90])
+        difference() {
+            union() {
+                translate([-flange_hx, -flange_hy, flange_back])
+                    cube([2 * flange_hx, 2 * flange_hy, flange_t]);
+                for (s = [-1, 1])
+                    clamp_station(s * station_pitch / 2);
+            }
+            slot_h = max(clamp_slot, stair_z) + 0.2;
+            for (s = [-1, 1])
+                translate([0, s * station_pitch / 2, flange_back - (slot_h - 0.2) / 2])
+                    cube([2 * (v_half + v_wall) + 4, clamp_band_width + 1, slot_h], center=true);
+            for (i = [0:3]) {
+                p = bolt_xy(i);
+                translate([p[0], p[1], flange_back - 1])
+                    cylinder(h=flange_t + 2, d=bolt_d, $fn=24);
+            }
+        }
+}
+
+module pole_bracket_print() {
+    translate([0, 0, -cheek_back])
+        pole_bracket();
 }
 
 module rim_profile_2d() {
@@ -725,6 +857,7 @@ module assembly() {
     place_radome();
     place_reflector();
     place_gaskets();
+    pole_bracket();
 }
 
 if (part == "hub")
@@ -745,5 +878,7 @@ else if (part == "reflector_lid")
     lid();
 else if (part == "gasket")
     gasket();
+else if (part == "pole_bracket")
+    pole_bracket_print();
 else
     assembly();
