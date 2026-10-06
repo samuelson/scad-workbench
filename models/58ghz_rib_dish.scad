@@ -36,7 +36,7 @@ hoop_index = 0; // [0:1:7]
 hoop_seg = 0; // [0:1:7]
 hoop_w = 6; // [3:0.5:12]
 hoop_t = 1.2; // [0.8:0.1:4]
-thin_ribs = false;
+thin_ribs = 0; // [0:1:8]
 rim_index = 0; // [0:1:15]
 
 /* [Feed arm] */
@@ -120,6 +120,8 @@ pi_ = 3.141592653589793;
 lap_ang = lap_w / rim_hole_r * 180 / pi_;
 thin_rib_r0 = hub_r - hoop_clip;
 thin_rib_r1 = rim_r0 + hoop_clip;
+thin_rib_h = rib_h - 1.2;
+hoop_h = thin_rib_h;
 z_skirt = rim_r0 * rim_r0 / (4 * focal_length) - rib_h;
 end_keep_ang = atan(rib_w / 2 / dish_r) - atan(lap_clear / 2 / dish_r);
 rim_bolt_off = min(4, rib_w / 2 - bolt_hole / 2 - 1.6);
@@ -228,23 +230,33 @@ function hoop_piece_len(r, div) =
     r * hoop_span(r) / div * pi_ / 180
         + (div == 1 ? 2 * hoop_clip : hoop_clip + hoop_over);
 function hoop_fits_len(len) =
-    bed_span_x(len, rib_h) <= printer_bed_mm
-        && bed_span_y(len, rib_h) <= printer_bed_mm;
+    bed_span_x(len, hoop_h) <= printer_bed_mm
+        && bed_span_y(len, hoop_h) <= printer_bed_mm;
 function hoop_div_from(d) =
     d >= 16 ? d :
         (hoop_fits_len(hoop_piece_len(rim_r0, d)) ? d : hoop_div_from(d + 1));
-hoop_div = hoop_count == 0 ? 1 : hoop_div_from(1);
-thin_n = thin_ribs ? (hoop_div == 1 ? 1 : hoop_div - 1) : 0;
+hoop_div_need = hoop_count == 0 ? 1 : hoop_div_from(1);
+hoop_div = hoop_count == 0 ? 1 :
+    (hoop_div_need == 1 ? 1 :
+        (thin_ribs > 0 ? max(hoop_div_need, thin_ribs + 1) : hoop_div_need));
+thin_n = thin_ribs <= 0 ? 0 :
+    (hoop_div > 1 ? max(thin_ribs, hoop_div - 1) : thin_ribs);
+function thin_frac(j) = (j + 1) / (thin_n + 1);
+function hoop_station_az(seg, r) =
+    hoop_div <= 1 || thin_n <= 0 ?
+        hoop_az_face(r) + seg * hoop_span(r) / hoop_div :
+        (seg <= 0 ? hoop_az_face(r) :
+            (seg >= hoop_div ? 360 / n_ribs - hoop_az_face(r) :
+                thin_frac(seg - 1) * 360 / n_ribs));
 function hoop_seg_len(r, seg) =
     let (
-        ps = r * hoop_span(r) / hoop_div * pi_ / 180,
+        ps = r * (hoop_station_az(seg + 1, r) - hoop_station_az(seg, r)) * pi_ / 180,
         s0 = seg == 0 ? hoop_clip : hoop_over,
         s1 = seg == hoop_div - 1 ? hoop_clip : hoop_over
     ) ps + s0 + s1;
 function hoop_len(r) = hoop_seg_len(r, hoop_seg);
-function hoop_print_x() = bed_span_x(hoop_len(hoop_r(hoop_index)), rib_h);
-function hoop_print_y() = bed_span_y(hoop_len(hoop_r(hoop_index)), rib_h);
-function thin_frac(j) = (j + 1) / (thin_n + 1);
+function hoop_print_x() = bed_span_x(hoop_len(hoop_r(hoop_index)), hoop_h);
+function hoop_print_y() = bed_span_y(hoop_len(hoop_r(hoop_index)), hoop_h);
 function rim_piece_fits(h) =
     h < 80
         && bed_span_x(rim_foot_x_h(h), rim_foot_y_h(h)) <= printer_bed_mm
@@ -259,7 +271,7 @@ function thin_hit(div, j = 0, k = 1) =
 function rim_div_from(d) =
     d >= 24 ? d :
         (!rim_piece_fits(rim_half_ang / d) ? rim_div_from(d + 1) :
-            (thin_ribs && thin_hit(d) ? rim_div_from(d + 1) : d));
+            (thin_n > 0 && thin_hit(d) ? rim_div_from(d + 1) : d));
 rim_div = rim_div_from(1);
 rim_piece_half = rim_half_ang / rim_div;
 function rim_step() = 2 * rim_piece_half;
@@ -267,11 +279,11 @@ function rim_base0(i) = -rim_half_ang + i * rim_step();
 function rim_base1(i) = rim_base0(i) + rim_step();
 function rim_a0(i) = rim_base0(i) - (i > 0 ? lap_ang : 0);
 function rim_a1(i) = rim_base1(i);
-z_rim_back = thin_ribs ? z_skirt : z_floor;
+z_rim_back = thin_n > 0 ? z_skirt : z_floor;
 z_lap_mid = z_rim_back + (z_of(rim_hole_r) - z_rim_back) / 2;
 function thin_rib_print_x() = thin_rib_r1 - thin_rib_r0;
-function thin_rib_print_y() = z_of(thin_rib_r1) - (z_of(thin_rib_r0) - rib_h);
-function rim_print_z() = thin_ribs ? dish_depth - z_skirt : rim_h;
+function thin_rib_print_y() = z_of(thin_rib_r1) - (z_of(thin_rib_r0) - thin_rib_h);
+function rim_print_z() = thin_n > 0 ? dish_depth - z_skirt : rim_h;
 function bolt_xy(i) = let (a = 45 + i * 90) [bolt_circle_r * cos(a), bolt_circle_r * sin(a)];
 function pole_insert_d() = bolt_d <= 3.2 ? 4.0 : (bolt_d <= 4.2 ? 5.6 : 6.5);
 function hub_pole_recess_d() =
@@ -291,10 +303,22 @@ echo(rib_mount_print=[rib_print_x(), rib_mount_print_y(), rib_w]);
 echo(thin_rib_print=[thin_rib_print_x(), thin_rib_print_y(), hoop_t]);
 echo(rim_print=[rim_print_x(), rim_print_y(), rim_print_z()]);
 echo(hub_print=[hub_od, hub_od, hub_print_h()]);
+echo(
+    hoop_radial_end=[
+        hoop_count == 0 ? 0 : hoop_seg_len(hoop_r(0), 0),
+        hoop_count * n_ribs * (hoop_div == 1 ? 1 : 2)
+    ]
+);
+echo(
+    hoop_thin_span=[
+        hoop_count == 0 || hoop_div <= 2 ? 0 : hoop_seg_len(hoop_r(0), 1),
+        hoop_count * n_ribs * max(hoop_div - 2, 0)
+    ]
+);
 echo(cavity_h=cavity_h, r_mount=r_mount, arm_len=arm_len, arm_ang=arm_ang);
 echo(boot_along_od=boot_along_od, boot_across_od=boot_across_od, mount_along_id=mount_along_id, mount_across_id=mount_across_id);
 
-assert(n_ribs >= 1 && n_ribs <= 8, "Rib count must be 1 to 8");
+assert(thin_ribs >= 0 && thin_ribs <= 8, "Thin rib count must be 0 to 8");
 assert(rib_r0 > 8, "Hub is too small for the half-laps");
 assert(thickness / 2 > insert_h + 0.6, "Stock is too thin for the hub lap");
 assert(thickness > insert_h + 1, "Stock is too thin for the insert");
@@ -370,7 +394,7 @@ assert(hub_pole_face != "insert" || hub_pole_seat_h > 2.4, "Pole insert is too s
 assert(pole_print_x() <= printer_bed_mm, "Pole bracket is wider than the printer");
 assert(pole_print_y() <= printer_bed_mm, "Pole bracket is longer than the printer");
 assert(pole_print_z() <= printer_bed_mm, "Pole bracket is taller than the printer");
-assert(hoop_count == 0 || hoop_w < rib_h - 2, "Mesh hoop is wider than the rib");
+assert(hoop_count == 0 || hoop_w < hoop_h - 2, "Mesh hoop is wider than the rib");
 assert(hoop_count == 0 || hoop_clip + 2 < rib_w / 2, "Mesh hoop slot meets in the rib");
 assert(rim_index >= 0 && rim_index < rim_div, "Rim index is out of range");
 assert(hoop_count == 0 || hoop_seg >= 0 && hoop_seg < hoop_div, "Hoop segment is out of range");
@@ -378,17 +402,18 @@ assert(hoop_count == 0 || hoop_r(hoop_index) > rib_w / 2 + hoop_clip + 1, "Mesh 
 assert(hoop_count == 0 || hoop_index < hoop_count, "Mesh hoop index is out of range");
 assert(hoop_count == 0 || hoop_print_x() <= printer_bed_mm, "Mesh hoop is longer than the printer");
 assert(hoop_count == 0 || hoop_print_y() <= printer_bed_mm, "Mesh hoop is taller than the printer");
-assert(!thin_ribs || z_skirt < z_floor - 1, "Rim skirt is not deeper than the rib seat");
-assert(!thin_ribs || end_keep_ang > 0.5, "Thin-rib rim ends are too short");
-assert(!thin_ribs || end_keep_ang + 1 < rim_piece_half, "Thin-rib rim skirt has no span");
-assert(!thin_ribs || hoop_clip + 1 < rim_w, "Thin-rib rim slot breaks out of the rim");
-assert(!thin_ribs || hoop_clip + 2 < hub_r - bolt_circle_r, "Thin-rib hub slot hits the pole bolts");
-assert(!thin_ribs || thin_rib_print_x() <= printer_bed_mm, "Thin rib is longer than the printer");
-assert(!thin_ribs || thin_rib_print_y() <= printer_bed_mm, "Thin rib is taller than the printer");
-assert(!thin_ribs || hoop_t <= printer_bed_mm, "Thin rib is thicker than the printer");
-assert(!thin_ribs || thin_rib_r0 > 4, "Thin-rib hub clip is inside the axis");
-assert(!thin_ribs || hoop_count == 0 || hoop_r(0) > thin_rib_r0 + hoop_t, "Mesh hoop cuts the thin-rib hub clip");
-assert(!thin_ribs || hoop_count == 0 || hoop_r(hoop_count - 1) < thin_rib_r1 - hoop_t, "Mesh hoop cuts the thin-rib rim clip");
+assert(thin_n == 0 || z_skirt < z_floor - 1, "Rim skirt is not deeper than the rib seat");
+assert(thin_n == 0 || end_keep_ang > 0.5, "Thin-rib rim ends are too short");
+assert(thin_n == 0 || end_keep_ang + 1 < rim_piece_half, "Thin-rib rim skirt has no span");
+assert(thin_n == 0 || hoop_clip + 1 < rim_w, "Thin-rib rim slot breaks out of the rim");
+assert(thin_n == 0 || hoop_clip + 2 < hub_r - bolt_circle_r, "Thin-rib hub slot hits the pole bolts");
+assert(thin_n == 0 || thin_rib_print_x() <= printer_bed_mm, "Thin rib is longer than the printer");
+assert(thin_n == 0 || thin_rib_print_y() <= printer_bed_mm, "Thin rib is taller than the printer");
+assert(thin_n == 0 || hoop_t <= printer_bed_mm, "Thin rib is thicker than the printer");
+assert(thin_n == 0 || thin_rib_r0 > 4, "Thin-rib hub clip is inside the axis");
+assert(thin_n == 0 || hoop_count == 0 || hoop_r(0) > thin_rib_r0 + hoop_t, "Mesh hoop cuts the thin-rib hub clip");
+assert(thin_n == 0 || hoop_count == 0 || hoop_r(hoop_count - 1) < thin_rib_r1 - hoop_t, "Mesh hoop cuts the thin-rib rim clip");
+assert(thin_rib_h > hoop_w + 2, "Thin rib is shorter than the hoop tab");
 if (clamp_pitch < min_clamp_pitch)
     echo(str("clamp_pitch raised to ", station_pitch, " mm so the stations clear the bolt holes"));
 
@@ -412,40 +437,40 @@ module hoop_slots() {
 module hoop_profile_2d(r) {
     translate([r, z_of(r)])
         rotate([0, 0, atan(r / (2 * focal_length))])
-            translate([-hoop_t / 2, -rib_h])
-                square([hoop_t, rib_h]);
+            translate([-hoop_t / 2, -hoop_h])
+                square([hoop_t, hoop_h]);
 }
 
 module hoop_segment(r, seg = 0) {
-    ps = hoop_span(r) / hoop_div;
     a_clip = hoop_clip / r * 180 / pi_;
     a_over = hoop_over / r * 180 / pi_;
     start_extra = seg == 0 ? a_clip : a_over;
     end_extra = seg == hoop_div - 1 ? a_clip : a_over;
-    a0 = hoop_az_face(r) + seg * ps - start_extra;
-    rotate([0, 0, a0])
-        rotate_extrude(angle=ps + start_extra + end_extra, convexity=4)
+    a0s = hoop_station_az(seg, r);
+    a1s = hoop_station_az(seg + 1, r);
+    rotate([0, 0, a0s - start_extra])
+        rotate_extrude(angle=a1s - a0s + start_extra + end_extra, convexity=4)
             hoop_profile_2d(r);
 }
 
 module hoop_piece_2d(r, seg) {
     hx = hoop_seg_len(r, seg);
     nw = hoop_t + 2 * lap_clear;
-    nh = rib_h - hoop_w + 0.4;
+    nh = hoop_h - hoop_w + 0.4;
     difference() {
-        square([hx, rib_h]);
+        square([hx, hoop_h]);
         if (seg == 0)
-            square([hoop_clip + eps, rib_h - hoop_w]);
+            square([hoop_clip + eps, hoop_h - hoop_w]);
         if (seg == hoop_div - 1)
             translate([hx - hoop_clip - eps, 0])
-                square([hoop_clip + 2 * eps, rib_h - hoop_w]);
+                square([hoop_clip + 2 * eps, hoop_h - hoop_w]);
         if (seg > 0)
             translate([hoop_over - nw / 2, -eps])
                 square([nw, nh]);
         if (seg < hoop_div - 1)
             translate([hx - hoop_over - nw / 2, -eps])
                 square([nw, nh]);
-        if (hoop_div == 1 && thin_ribs && thin_n > 0)
+        if (hoop_div == 1 && thin_n > 0)
             for (j = [0:thin_n - 1]) {
                 s = hoop_clip
                     + r * (thin_frac(j) * 360 / n_ribs - hoop_az_face(r)) * pi_ / 180;
@@ -455,18 +480,33 @@ module hoop_piece_2d(r, seg) {
     }
 }
 
+module hoop_print_one(r, seg, y) {
+    hx = hoop_seg_len(r, seg);
+    translate([0, y, 0])
+        translate([hx / 2, hoop_h / 2, 0])
+            rotate([0, 0, bed_rot(hx, hoop_h)])
+                translate([-hx / 2, -hoop_h / 2, 0])
+                    linear_extrude(hoop_t)
+                        hoop_piece_2d(r, seg);
+}
+
 module hoop_print() {
-    r = hoop_r(hoop_index);
-    hx = hoop_seg_len(r, hoop_seg);
-    translate([hx / 2, rib_h / 2, 0])
-        rotate([0, 0, bed_rot(hx, rib_h)])
-            translate([-hx / 2, -rib_h / 2, 0])
-                linear_extrude(hoop_t)
-                    hoop_piece_2d(r, hoop_seg);
+    gap = 4;
+    if (hoop_count > 0)
+        for (hi = [0:hoop_count - 1]) {
+            r = hoop_r(hi);
+            rows = hoop_div <= 1 ? 1 : 2;
+            row0 = hi * rows * (hoop_h + gap);
+            hoop_print_one(r, 0, row0);
+            if (hoop_div == 2)
+                hoop_print_one(r, 1, row0 + hoop_h + gap);
+            if (hoop_div > 2)
+                hoop_print_one(r, 1, row0 + hoop_h + gap);
+        }
 }
 
 module thin_rib_profile_2d() {
-    polygon(concat(para_pts(thin_rib_r0, thin_rib_r1, 0), para_pts(thin_rib_r1, thin_rib_r0, -rib_h)));
+    polygon(concat(para_pts(thin_rib_r0, thin_rib_r1, 0), para_pts(thin_rib_r1, thin_rib_r0, -thin_rib_h)));
 }
 
 module thin_rib_hoop_slots() {
@@ -496,7 +536,7 @@ module place_thin_rib(az) {
 module thin_rib_clip_2d(r_in, r_out) {
     polygon(concat(
         para_pts(r_in, r_out, 2),
-        para_pts(r_out, r_in, -rib_h - 1)
+        para_pts(r_out, r_in, -thin_rib_h - lap_clear)
     ));
 }
 
@@ -700,7 +740,7 @@ module hub() {
                 hub_pocket();
                 hub_insert();
             }
-        if (thin_ribs && thin_n > 0)
+        if (thin_n > 0)
             for (i = [0:n_ribs - 1], j = [0:thin_n - 1])
                 rotate([0, 0, (i + thin_frac(j)) * 360 / n_ribs])
                     thin_rib_hub_slot();
@@ -814,7 +854,7 @@ module rim_piece(i) {
     zb = z_rim_back;
     difference() {
         rim_sector(zb, a0, a1);
-        if (thin_ribs) {
+        if (thin_n > 0) {
             if (i == 0)
                 rim_end_step_cw();
             if (i == rim_div - 1)
@@ -1180,7 +1220,7 @@ module assembly() {
             place_rib(i * 360 / n_ribs);
         for (p = [0:rim_div - 1])
             place_rim(i, p);
-        if (thin_ribs && thin_n > 0)
+        if (thin_n > 0)
             for (j = [0:thin_n - 1])
                 place_thin_rib((i + thin_frac(j)) * 360 / n_ribs);
         if (hoop_count > 0)
