@@ -38,7 +38,7 @@ self.onmessage = async (event) => {
     const bytes = instance.FS.readFile("/out.stl");
     if (!bytes.length) throw new Error("The model produced an empty STL.");
     const buffer = bytes.slice().buffer;
-    self.postMessage({ type: "success", buffer }, { transfer: [buffer] });
+    self.postMessage({ type: "success", buffer, logs }, { transfer: [buffer] });
   } catch (e) {
     self.postMessage({ type: "error", message: (e instanceof Error ? e.message : String(e)) + (logs.length ? `\n${logs.slice(-5).join("\n")}` : "") });
   }

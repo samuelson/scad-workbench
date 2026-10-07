@@ -1,6 +1,8 @@
 import { parseParameters, setParameter } from "./scad-parameters.js";
+import { hasAssemblyKit, jobSource, kitFromLogs, kitFromParameters, probeSource } from "./assembly-kit.js";
 import { mountViewer } from "./viewer.js";
 import { icons } from "./icons.js";
+import { zipStore } from "./zip.js";
 
 let models = [];
 
@@ -20,6 +22,7 @@ const state = {
 };
 
 let worker = null;
+let kitWorker = null;
 let lastRender = 0;
 let lastParamSource = null;
 const viewer = mountViewer(document.getElementById("viewer"));
@@ -45,6 +48,7 @@ const els = {
   previewTitle: document.getElementById("preview-title"),
   renderButton: document.getElementById("render-button"),
   downloadButton: document.getElementById("download-button"),
+  downloadZipButton: document.getElementById("download-zip-button"),
   resetView: document.getElementById("reset-view"),
   viewportMessage: document.getElementById("viewport-message"),
   viewportHeading: document.getElementById("viewport-heading"),
@@ -68,8 +72,15 @@ function readableValue(parameter) {
   try { return JSON.parse(parameter.value); } catch { return parameter.value.slice(1, -1); }
 }
 
-function changeSource(next) {
+function stopWorkers() {
   worker?.terminate();
+  worker = null;
+  kitWorker?.terminate();
+  kitWorker = null;
+}
+
+function changeSource(next) {
+  stopWorkers();
   lastRender += 1;
   state.busy = false;
   state.source = next;
@@ -221,7 +232,7 @@ function parameterRow(parameter) {
     range.value = parameter.value;
     range.setAttribute("aria-label", `Adjust ${title}`);
     range.addEventListener("input", () => {
-      worker?.terminate();
+      stopWorkers();
       lastRender += 1;
       state.busy = false;
       state.source = setParameter(state.source, parameter, range.value);
@@ -401,6 +412,10 @@ function sync({ skipParameters = false } = {}) {
   els.renderButton.innerHTML = `${icons.play()} ${state.busy ? "Rendering…" : "Render model"}`;
   els.downloadButton.disabled = !state.stl;
   els.downloadButton.innerHTML = `${icons.download()} STL`;
+  const kitAvailable = hasAssemblyKit(state.source);
+  els.downloadZipButton.disabled = state.busy || !state.source || !kitAvailable;
+  els.downloadZipButton.title = kitAvailable ? "Download all assembly STLs as a zip" : "This model has no assembly parts";
+  els.downloadZipButton.innerHTML = `${icons.download()} All STLs`;
   els.viewportMessage.hidden = Boolean(state.stl);
   els.viewportHeading.textContent = state.busy ? "Building mesh…" : "No preview yet";
   els.viewportDetail.textContent = state.busy ? "Complex models can take a moment." : "Render the source to inspect the model.";
@@ -421,9 +436,9 @@ function sync({ skipParameters = false } = {}) {
 
 async function loadModel(index) {
   try {
-    const response = await fetch(models[index].path);
+    const response = await fetch(models[index].path, { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load this model.");
-    worker?.terminate();
+    stopWorkers();
     lastRender += 1;
     state.busy = false;
     state.source = await response.text();
@@ -441,9 +456,29 @@ async function loadModel(index) {
   }
 }
 
-function renderModel() {
+async function syncLibrarySource() {
+  if (state.active < 0) return state.source;
+  const model = models[state.active];
+  if (!model?.path) return state.source;
+  const response = await fetch(model.path, { cache: "no-store" });
+  if (!response.ok) return state.source;
+  let next = await response.text();
+  for (const live of parseParameters(state.source)) {
+    const diskParam = parseParameters(next).find((parameter) => parameter.name === live.name);
+    if (diskParam) next = setParameter(next, diskParam, live.value);
+  }
+  state.source = next;
+  return next;
+}
+
+async function renderModel() {
   if (!state.source.trim() || state.busy) return;
-  worker?.terminate();
+  try {
+    await syncLibrarySource();
+  } catch {
+    /* keep the in-memory source */
+  }
+  stopWorkers();
   let next;
   try {
     next = new Worker(new URL("./render-worker.js", import.meta.url), { type: "module" });
@@ -493,7 +528,7 @@ async function openLocal(file) {
     sync();
     return;
   }
-  worker?.terminate();
+  stopWorkers();
   lastRender += 1;
   state.busy = false;
   state.stl = null;
@@ -509,12 +544,100 @@ async function openLocal(file) {
 
 function download() {
   if (!state.stl) return;
-  const url = URL.createObjectURL(new Blob([state.stl], { type: "model/stl" }));
+  saveBlob(new Blob([state.stl], { type: "model/stl" }), `${fileSlug()}.stl`);
+}
+
+function fileSlug() {
+  return state.name.replace(/\.scad$/i, "").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = state.name.replace(/\.scad$/i, "").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase() + ".stl";
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function ensureKitWorker() {
+  if (!kitWorker) kitWorker = new Worker(new URL("./render-worker.js", import.meta.url), { type: "module" });
+  return kitWorker;
+}
+
+function renderSource(source) {
+  const job = lastRender;
+  return new Promise((resolve, reject) => {
+    let next;
+    try {
+      next = ensureKitWorker();
+    } catch (cause) {
+      reject(cause instanceof Error ? cause : new Error("The rendering engine could not start."));
+      return;
+    }
+    const finish = (fn) => (event) => {
+      next.removeEventListener("message", onMessage);
+      next.removeEventListener("error", onError);
+      fn(event);
+    };
+    const onMessage = finish((event) => {
+      if (job !== lastRender) reject(new Error("cancelled"));
+      else if (event.data.type === "success" && event.data.buffer) resolve(event.data);
+      else reject(new Error(event.data.message || "OpenSCAD could not render this file."));
+    });
+    const onError = finish((event) => {
+      reject(new Error(event.message || "The rendering engine could not start."));
+    });
+    next.addEventListener("message", onMessage);
+    next.addEventListener("error", onError);
+    next.postMessage({ source });
+  });
+}
+
+async function downloadKit() {
+  if (!state.source.trim() || state.busy || !hasAssemblyKit(state.source)) return;
+  try {
+    await syncLibrarySource();
+  } catch {
+    /* keep the in-memory source */
+  }
+  const job = ++lastRender;
+  const parameters = parseParameters(state.source);
+  state.busy = true;
+  state.error = "";
+  state.status = "Listing assembly parts…";
+  sync();
+  try {
+    const probe = await renderSource(probeSource(state.source, parameters));
+    if (job !== lastRender) return;
+    const jobs = kitFromLogs(probe.logs) || kitFromParameters(parameters);
+    if (!jobs.length) throw new Error("This model has no printable assembly parts.");
+    const files = [];
+    for (let i = 0; i < jobs.length; i++) {
+      if (job !== lastRender) return;
+      const item = jobs[i];
+      state.status = `Rendering ${item.file} (${i + 1}/${jobs.length})…`;
+      sync();
+      const result = await renderSource(jobSource(state.source, item));
+      if (job !== lastRender) return;
+      files.push({ name: item.file, data: new Uint8Array(result.buffer) });
+    }
+    saveBlob(new Blob([zipStore(files)], { type: "application/zip" }), `${fileSlug()}-kit.zip`);
+    state.status = `Saved ${files.length} STLs`;
+    state.busy = false;
+    kitWorker?.terminate();
+    kitWorker = null;
+    sync();
+  } catch (e) {
+    if (job !== lastRender) return;
+    if (e instanceof Error && e.message === "cancelled") return;
+    state.error = e instanceof Error ? e.message : String(e);
+    state.status = "ZIP export failed";
+    state.busy = false;
+    kitWorker?.terminate();
+    kitWorker = null;
+    sync();
+  }
 }
 
 function pickFile() {
@@ -564,8 +687,9 @@ els.codeToggle.addEventListener("click", () => {
   sync();
 });
 els.sourceEditor.addEventListener("input", () => changeSource(els.sourceEditor.value));
-els.renderButton.addEventListener("click", renderModel);
+els.renderButton.addEventListener("click", () => void renderModel());
 els.downloadButton.addEventListener("click", download);
+els.downloadZipButton.addEventListener("click", () => void downloadKit());
 els.resetView.addEventListener("click", () => {
   state.resetKey += 1;
   viewer.set(state.stl, state.resetKey);
@@ -577,7 +701,7 @@ els.dismissError.addEventListener("click", () => {
 bindColumnResize("shelf");
 bindColumnResize("editor");
 window.addEventListener("resize", applyPanelWidths);
-window.addEventListener("beforeunload", () => worker?.terminate());
+window.addEventListener("beforeunload", stopWorkers);
 
 function registerHostTool() {
   const context = document.modelContext;
