@@ -1,6 +1,6 @@
 import { parseParameters, setParameter } from "./scad-parameters.js";
 
-const SKIP_PARTS = new Set(["assembly", "layout"]);
+const SKIP_PARTS = new Set(["assembly", "layout", "fit_test"]);
 
 function formatParamValue(parameter, value) {
   if (parameter.kind === "text") return JSON.stringify(String(value));

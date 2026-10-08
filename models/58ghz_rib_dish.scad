@@ -27,7 +27,7 @@
 // bolts to the hub back with four screws and hose-clamps to a mast.
 
 /* [Selection] */
-part = "assembly"; // [assembly, hub, radial_rib, radial_rib_mount, radial_rib_arm, rim_segment, thin_rib, mesh_hoop, feed_arm, enclosure_body, radome_lid, reflector_lid, gasket, pole_bracket]
+part = "assembly"; // [assembly, hub, radial_rib, radial_rib_mount, radial_rib_arm, rim_segment, thin_rib, mesh_hoop, feed_arm, enclosure_body, radome_lid, reflector_lid, gasket, pole_bracket, fit_test]
 fast_preview = true;
 
 /* [Dish] */
@@ -100,6 +100,8 @@ insert_d = 4.0;
 insert_h = 4;
 bolt_hole = 3.3;
 filament_d = 1.75;
+filament_v = 2.20;
+filament_h = 2.00;
 dt_angle = 12;
 hub_dt_extra = 4;
 dt_join = 0.6;
@@ -150,7 +152,7 @@ mount_along = use_square_arm ? feed_along_od : arm_along;
 hoop_clip = 5;
 hoop_over = hoop_clip;
 slot_t = hoop_t + 2 * lap_clear;
-thin_rib_clear = 0.05;
+thin_rib_clear = 0.10;
 thin_slot_t = hoop_t + 2 * thin_rib_clear;
 pi_ = 3.141592653589793;
 function spin_fn(r) =
@@ -234,6 +236,9 @@ z_arm_lap = -hub_t + insert_h + 1;
 z_arm_dt = z_of(hub_r) - rib_h * 2 / 3;
 arm_sec1 = hub_r / 3;
 arm_sec2 = 2 * hub_r / 3;
+arm_mid_relief = 0.1 * (arm_sec2 - arm_sec1);
+arm_mid_extra = 0.4;
+arm_step_slant = max(1.2, (z_arm_dt - z_arm_lap) * tan(15));
 arm_bolt_r = (arm_sec2 + hub_r) / 2;
 arm_lip_bolt_r = arm_sec1 / 2;
 arm_fil_r1 = (arm_sec1 + arm_sec2) / 2;
@@ -535,7 +540,7 @@ module hoop_slots() {
         for (s = [0, 1])
             translate([0, 0, s == 0 ? -eps : rib_w - hoop_clip])
                 linear_extrude(hoop_clip + eps)
-                    hoop_slot_2d(r, hoop_t + 2 * thin_rib_clear);
+                    hoop_slot_2d(r, hoop_t + 0.1);
     }
 }
 
@@ -661,7 +666,7 @@ module thin_rib_fil_chord(r, r_od) {
     translate([r, 0, z])
         rotate([90, 0, 0])
             translate([0, 0, -y])
-                filament_bore(2 * y);
+                filament_bore(2 * y, filament_h);
 }
 
 module thin_rib_rim_filament() {
@@ -690,8 +695,8 @@ module cap_head_cut() {
     cylinder(h=cap_head_h + 1, d=cap_head_d, $fn=24);
 }
 
-module filament_bore(h) {
-    cylinder(h=h, d=filament_d, $fn=20);
+module filament_bore(h, d=filament_v) {
+    cylinder(h=h, d=d, $fn=20);
 }
 
 module hub_dt_pin_rib(clear=0) {
@@ -774,15 +779,27 @@ module hub_arm_inner_void(clear=0) {
 module hub_arm_mid_pocket(clear=0) {
     w = rib_w + 2 * clear;
     z0 = z_arm_lap - (clear > 0 ? lap_clear : 0);
-    translate([arm_sec1 - 0.4, -w / 2, z0])
-        cube([arm_sec2 - arm_sec1 + 0.8, w, z_of(hub_r) + 8 - z0]);
+    z1 = z_of(hub_r) + 8;
+    r0 = arm_sec1 + arm_mid_relief;
+    r1 = arm_sec2;
+    r1s = arm_sec2 + arm_step_slant;
+    translate([arm_sec1, -w / 2, -hub_t - 1])
+        cube([arm_mid_relief + 0.4, w, z_arm_dt + hub_t + 1]);
+    hull() {
+        translate([r0, -w / 2, z0])
+            cube([max(r1 - r0, 0.2), w, eps]);
+        translate([r0, -w / 2, z_arm_dt])
+            cube([max(r1s - r0, 0.2), w, eps]);
+    }
+    translate([r0, -w / 2, z_arm_dt])
+        cube([max(r1 - r0, 0.2), w, z1 - z_arm_dt]);
 }
 
 module hub_filaments_rib() {
     for (k = [1 / 3, 2 / 3])
         translate([hub_fil_r(k), -hub_t - 1, rib_w / 2])
             rotate([-90, 0, 0])
-                filament_bore(hub_t + z_of(hub_r) + 8);
+                filament_bore(hub_t + z_of(hub_r) + 8, filament_h);
 }
 
 module hub_filaments_dish() {
@@ -919,7 +936,7 @@ module arm_joint_fil_chord(r, through_od=false) {
     translate([r, 0, z])
         rotate([90, 0, 0])
             translate([0, 0, -y])
-                filament_bore(2 * y);
+                filament_bore(2 * y, filament_h);
 }
 
 module arm_joint_filaments_dish() {
@@ -1113,7 +1130,7 @@ module hub_pocket() {
 
 module hub_arm_pocket() {
     hub_arm_inner_void(lap_clear);
-    hub_arm_mid_pocket(lap_clear);
+    hub_arm_mid_pocket(lap_clear + arm_mid_extra);
     arm_dt_pin_dish(lap_clear);
 }
 
@@ -1288,7 +1305,7 @@ module rim_mt_filaments(a_sh, dir=1) {
     rotate([0, 0, a_sh + dir * 0.5 * lap_ang])
         translate([rim_r0 - 1, 0, z_tenon_mid])
             rotate([0, 90, 0])
-                filament_bore(rim_w + 2);
+                filament_bore(rim_w + 2, filament_h);
 }
 
 module rim_piece(i) {
@@ -1705,6 +1722,51 @@ module assembly() {
     pole_bracket();
 }
 
+module fit_test_label(txt) {
+    linear_extrude(0.7)
+        text(
+            txt,
+            size=3.3,
+            font="Liberation Sans",
+            halign="center",
+            valign="center"
+        );
+}
+
+module fit_test() {
+    n = 6;
+    pitch = 13;
+    mx = 8;
+    slot_len = 11;
+    hole_y = 9;
+    h = 5.5;
+    side_z = h / 2;
+    L = 2 * mx + (n - 0.5) * pitch;
+    W = hole_y + 10 + slot_len;
+    difference() {
+        cube([L, W, h]);
+        for (i = [0:n - 1]) {
+            c = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30][i];
+            d = [1.75, 1.85, 1.95, 2.05, 2.15, 2.25][i];
+            slbl = ["0.05", "0.10", "0.15", "0.20", "0.25", "0.30"][i];
+            dlbl = ["1.75", "1.85", "1.95", "2.05", "2.15", "2.25"][i];
+            x = mx + i * pitch;
+            sw = hoop_t + 2 * c;
+            translate([x - sw / 2, W - slot_len, -1])
+                cube([sw, slot_len + 1, h + 2]);
+            translate([x, hole_y, -1])
+                cylinder(h=h + 2, d=d, $fn=24);
+            translate([x + pitch / 2, -1, side_z])
+                rotate([-90, 0, 0])
+                    cylinder(h=W + 2, d=d, $fn=24);
+            translate([x, W - slot_len - 4.2, h - 0.5])
+                fit_test_label(slbl);
+            translate([x, hole_y - 5.2, h - 0.5])
+                fit_test_label(dlbl);
+        }
+    }
+}
+
 if (part == "hub")
     hub_print();
 else if (part == "radial_rib")
@@ -1731,5 +1793,7 @@ else if (part == "gasket")
     gasket();
 else if (part == "pole_bracket")
     pole_bracket_print();
+else if (part == "fit_test")
+    fit_test();
 else
     assembly();
