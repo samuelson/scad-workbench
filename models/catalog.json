@@ -33,5 +33,10 @@
     "name": "Mast antenna clip",
     "description": "25.4–76.2 mm tubing · zip tie eyelet",
     "path": "./models/mast-antenna-clip.scad"
+  },
+  {
+    "name": "Simple parabolic",
+    "description": "Prime-focus rib frame · feed arm · focal box",
+    "path": "./models/simple_parabolic.scad"
   }
 ]

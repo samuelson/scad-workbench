@@ -97,16 +97,17 @@ export function parseParameters(source) {
       if (active.includes("{")) stopped = true;
       return;
     }
-    if (match && active.includes("=") && !match[2].startsWith("$") && !hidden) {
+    if (match && active.includes("=") && !match[2].startsWith("$")) {
       const parsed = parseValue(match[3]);
       const widget = parseWidget(match[4], parsed.kind);
       result.push({
         name: match[2],
         label: prettyName(match[2]),
         description: pendingDescription,
-        group: group.toLowerCase() === "global" ? "" : group,
+        group: hidden || group.toLowerCase() === "global" ? "" : group,
         kind: parsed.kind,
         value: parsed.value,
+        hidden,
         line: index,
         ...(parsed.components ? { components: parsed.components } : {}),
         ...widget,

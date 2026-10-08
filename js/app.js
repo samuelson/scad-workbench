@@ -259,7 +259,7 @@ function groupHeading(name) {
 function syncParameters() {
   const parameters = parseParameters(state.source);
   els.parameterContent.replaceChildren();
-  if (!parameters.length) {
+  if (!parameters.some((parameter) => !parameter.hidden)) {
     const empty = document.createElement("div");
     empty.className = "parameter-empty";
     empty.innerHTML = `${icons.sliders(22)}<strong>No Customizer parameters found</strong><p>Top-level assignments before the first <code>{</code> appear here. Use <code>// [min:step:max]</code>, dropdown lists, and <code>/* [Group] */</code> tabs as in OpenSCAD.</p>`;
@@ -271,9 +271,10 @@ function syncParameters() {
   intro.textContent = "Adjust dimensions, then render to update the model.";
   const list = document.createElement("div");
   list.className = "parameter-list";
-  const showGroups = parameters.some((parameter) => parameter.group);
+  const visible = parameters.filter((parameter) => !parameter.hidden);
+  const showGroups = visible.some((parameter) => parameter.group);
   let lastGroup = null;
-  for (const parameter of parameters) {
+  for (const parameter of visible) {
     if (showGroups && parameter.group !== lastGroup) {
       lastGroup = parameter.group;
       if (parameter.group) list.appendChild(groupHeading(parameter.group));
