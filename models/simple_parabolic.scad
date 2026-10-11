@@ -5,8 +5,9 @@
 // Vertex at the origin, opening toward +Z, focus at z = focal_length.
 // Structure sits behind the paraboloid (toward -Z). One radial rib runs
 // through the vertex to the pole-bracket edge, with a flat back pad.
-// Two M5 bolts through the dish face sit on the clamp-station centers,
-// with heat-set inserts opening on the paraboloid along +Z. Thin ribs
+// Two M5 bolts through the dish face sit between the clamp stations,
+// with heat-set inserts opening on the paraboloid along +Z. Hose-clamp
+// straps pass through the rib and the bracket in Z. Thin ribs
 // clip into the sides of that rib and into the rim, plus one opposite
 // the feed arm that clips into the stub end. One filament along each
 // side of the main rib pins the three side clips; the opposite thin rib
@@ -32,7 +33,7 @@ focal_length = 150; // [80:1:300]
 
 /* [Enclosure] */
 enclosure_x = 50; // [20:1:80]
-enclosure_y = 50; // [30:1:120]
+enclosure_y = 50; // [20:1:120]
 cavity_steps = 0; // [0:1:8]
 
 /* [Hidden] */
@@ -87,6 +88,9 @@ tenon_wall = 1.6;
 gasket_lip = 2;
 gasket_land = 1.2;
 boss_r = insert_d / 2 + 1.8;
+cover_over = 2.2;
+cover_wall = 1.6;
+cover_roof = 4.8;
 sock_wall = 2.5;
 groove_round = 1;
 fastener_clear = insert_d / 2 + 3;
@@ -162,12 +166,19 @@ arm_elbow_s_id = (feed_along_id / 2) * (1 - sin(arm_ang)) / cos(arm_ang);
 z_elbow_id = p_knee[2] + (feed_along_id / 2) * (sin(arm_ang) - 1) / cos(arm_ang);
 groove_outer_x = enclosure_x / 2 + gasket_lip + groove_w;
 groove_outer_y = enclosure_y / 2 + gasket_lip + groove_w;
-bolt_x = groove_outer_x + gasket_land + bolt_hole / 2;
+bolt_x = enclosure_x / 2 + enc_wall - boss_r;
 bolt_y = groove_outer_y + gasket_land + bolt_hole / 2;
 arm_insert_s = arm_len - socket_len + arm_end_keep;
 z_mount_top_rim = z_knee;
 z_mount_top_hub = z_mount_top_rim - mount_along * tan(arm_ang);
 miter_skew = (feed_along_od / 2) * abs(arm_dz / arm_dx);
+function face_bore_world_z(zl) =
+    let (s = (face_x - p_knee[0] + zl * sin(arm_ang)) / cos(arm_ang))
+        p_knee[2] + s * sin(arm_ang) + zl * cos(arm_ang);
+function face_bore_z0() =
+    min(face_bore_world_z(feed_along_id / 2), face_bore_world_z(-feed_along_id / 2));
+function face_bore_z1() =
+    max(face_bore_world_z(feed_along_id / 2), face_bore_world_z(-feed_along_id / 2));
 flange_t = 8;
 cheek_y = clamp_band_width + 6;
 pole_r = pole_diameter / 2 + pole_clearance;
@@ -188,7 +199,27 @@ flange_hy = station_pitch / 2 + cheek_y / 2;
 rib_x0 = -flange_hy;
 function pole_insert_d() = bolt_d <= 3.2 ? 4.0 : (bolt_d <= 4.2 ? 5.6 : 6.5);
 function pole_insert_h() = bolt_d <= 3.2 ? 4 : (bolt_d <= 4.2 ? 5 : 6);
-function pole_bolt_x(i) = (i == 0 ? -1 : 1) * station_pitch / 2;
+function pole_bolt_off() =
+    station_pitch / 2 - cheek_y / 2 - pole_insert_d() / 2 - 1.6;
+function pole_bolt_x(i) = (i == 0 ? -1 : 1) * pole_bolt_off();
+strap_along = clamp_band_width + 1;
+strap_path_r = pole_r + 0.5 + clamp_slot / 2;
+strap_r_grow = 50;
+function strap_v_x() = strap_path_r * sin(v_angle);
+function strap_v_z() = pole_cz + strap_path_r * cos(v_angle);
+function strap_z_top() = z_of(station_pitch / 2) - clamp_slot / 2 - 9;
+function strap_z_c_fit() =
+    let (xt = strap_v_x(), zt = strap_v_z(), z1 = strap_z_top())
+        (z1 * z1 - zt * zt - xt * xt) / (2 * (z1 - zt));
+function strap_r_fit() = abs(strap_z_top() - strap_z_c_fit());
+function strap_z_c() = strap_z_top() - strap_r_fit() - strap_r_grow;
+function strap_r() = strap_r_fit() + strap_r_grow + clamp_slot / 2;
+function strap_z_hi_at_y(y) =
+    let (d = strap_r() * strap_r() - y * y)
+        d <= 0 ? strap_z_top() : strap_z_c() + sqrt(d);
+function strap_z_lo_at_y(y) =
+    let (ri = max(strap_r() - clamp_slot, 0), d = ri * ri - y * y)
+        d <= 0 ? strap_z_top() - clamp_slot : strap_z_c() + sqrt(d);
 
 function z_of(r) = r * r / (4 * focal_length);
 function rib_back(x) = abs(x) <= flange_hy ? z_pad : z_of(x) - rib_h;
@@ -216,8 +247,10 @@ function bed_span_y(ax, ay) =
         abs(ax * sin(a)) + abs(ay * cos(a));
 function rim_print_x() = bed_span_x(rim_foot_x(), rim_foot_y());
 function rim_print_y() = bed_span_y(rim_foot_x(), rim_foot_y());
-function lid_outer_x() = 2 * max(enclosure_x / 2 + enc_wall, bolt_x + boss_r);
-function lid_outer_y() = 2 * max(enclosure_y / 2 + enc_wall, bolt_y + boss_r);
+function cover_r() = boss_r + cover_over;
+function cover_skirt_h() = cavity_h + 2 * lid_flange;
+function lid_outer_x() = 2 * (bolt_x + cover_r());
+function lid_outer_y() = 2 * (bolt_y + cover_r());
 function rib_s(r) =
     let (a = 2 * focal_length, u = r / a, n = sqrt(1 + u * u))
         r / 2 * n + a / 2 * ln(u + n);
@@ -259,8 +292,15 @@ function thin_inner_pin_r(az) = thin_r_hit(az) - hoop_clip / 2;
 function thin_az_is_end(az) = abs(sin(az)) < 1e-6;
 function thin_side_pin_y() = rib_w / 2 - hoop_clip / (2 * sqrt(2));
 function thin_side_pin_x_end() = thin_side_pin_y() + thin_rib_t / sqrt(2) + 1;
-function thin_side_pin_z() = z_of(thin_side_pin_y()) - thin_rib_h * 0.28;
-function thin_end_pin_z(r) = z_of(r) - thin_rib_h * 0.78;
+function thin_side_pin_z() =
+    z_of(thin_side_pin_y()) - filament_h / 2 - 0.5;
+function thin_end_pin_z(r) =
+    let (
+        z_old = z_of(r) - thin_rib_h * 0.78,
+        z_above_strap = strap_z_hi_at_y(0) + filament_h / 2 + 0.8,
+        z_below_side = thin_side_pin_z() - filament_h - 0.6
+    )
+        min(max(z_old, z_above_strap), z_below_side);
 function thin_rib_taz(j) = thin_az(j) - 180 / n_ribs;
 function hoop_station_az(seg, r) =
     hoop_div <= 1 ?
@@ -361,29 +401,35 @@ assert(arm_wall > 1.2, "Feed arm wall is too thin to print");
 assert(feed_along_id > 4 && feed_across_id > 4, "Feed arm bore is too small for a cable");
 assert(r_mount + mount_along / 2 <= rim_r0 + 0.05, "Arm mount hits the rim");
 assert(groove_w + 0.2 <= gasket_lip + enc_wall, "Groove does not fit in the wall");
-assert(bolt_x - bolt_hole / 2 > groove_outer_x + 0.6, "Lid bolts cut the gasket path");
 assert(bolt_y - bolt_hole / 2 > groove_outer_y + 0.6, "Lid bolts cut the gasket path");
+assert(bolt_x + boss_r <= enclosure_x / 2 + enc_wall, "Corner posts leave the side wall");
 assert(lid_floor > groove_d, "Lid floor is thinner than the groove");
 assert(lid_flange > groove_d + 1.2, "Lid flange is too thin for the groove");
 assert(gasket_h > 2 * groove_d, "Gasket is too thin to crush in both grooves");
 assert(cavity_h > enc_z_keep + 8, "Cavity is too short for the gasket wall");
 assert(enc_meet_d > sock_along_od / 2 + 1, "Enclosure is too close to the arm knee");
-assert(enclosure_y > sock_across_od + 4, "Enclosure is too narrow for the socket");
+assert(enclosure_y + 2 * enc_wall >= sock_across_od, "Enclosure face is narrower than the socket");
 assert(feed_across_od <= printer_bed_mm, "Feed arm is thicker than the printer");
 assert(feed_along_od <= printer_bed_mm, "Feed arm is wider than the printer");
+assert(cover_over >= cover_wall + 0.4, "Rain cover walls leave no clearance around the bosses");
+assert(cover_roof > groove_d + 1.6, "Rain cover roof is too thin to print on the outer face");
 assert(lid_outer_x() <= printer_bed_mm, "Enclosure is wider than the printer");
 assert(lid_outer_y() <= printer_bed_mm, "Enclosure is longer than the printer");
 assert(cavity_h + sock_along_od <= printer_bed_mm, "Enclosure body is taller than the printer");
 assert(socket_len > arm_end_keep + miter_skew + fastener_clear, "Enclosure socket is too short for the bolts");
 assert(arm_insert_off + insert_d / 2 + 0.6 < feed_along_od / 2, "Arm insert breaks out of the along wall");
 assert(pad_len < feed_across_id - 2, "Insert pad closes the feed arm");
-assert(station_pitch / 2 + bolt_d / 2 + 1.6 < flange_hy, "Pole bolts leave the flange");
-assert(station_pitch / 2 + pole_insert_d() / 2 < flange_hy - 1, "Pole inserts leave the rib pad");
+assert(pole_bolt_off() > pole_insert_d() / 2 + 1.6, "Pole bolts overlap at the vertex");
+assert(pole_bolt_off() + pole_insert_d() / 2 < station_pitch / 2 - cheek_y / 2, "Pole bolts overlap the clamp stations");
+assert(pole_bolt_off() + bolt_d / 2 + 1.6 < flange_hy, "Pole bolts leave the flange");
+assert(pole_bolt_off() + pole_insert_d() / 2 < flange_hy - 1, "Pole inserts leave the rib pad");
 assert(pole_insert_d() > bolt_d, "Pole insert is not larger than the bolt");
 assert(
-    z_of(station_pitch / 2) - z_pad > pole_insert_h() + 2,
+    z_of(pole_bolt_off()) - z_pad > pole_insert_h() + 2,
     "Pole insert is too deep for the rib"
 );
+assert(strap_along + 3 < cheek_y, "Clamp straps leave no stair side walls");
+assert(station_pitch / 2 + strap_along / 2 < flange_hy, "Clamp straps leave the flange");
 assert(pole_print_x() <= printer_bed_mm, "Pole bracket is wider than the printer");
 assert(pole_print_y() <= printer_bed_mm, "Pole bracket is longer than the printer");
 assert(pole_print_z() <= printer_bed_mm, "Pole bracket is taller than the printer");
@@ -409,6 +455,19 @@ assert(thin_side_pin_y() + filament_h / 2 < rib_w / 2, "Side filament breaks out
 assert(
     abs(thin_side_pin_z() - thin_end_pin_z(-rib_x0 - hoop_clip / 2)) > filament_h + 0.6,
     "Side filament hits the opposite-rib pin"
+);
+assert(
+    thin_side_pin_z() > strap_z_hi_at_y(thin_side_pin_y()) + filament_h / 2 + 0.6
+        || thin_side_pin_z() < strap_z_lo_at_y(thin_side_pin_y()) - filament_h / 2 - 0.6,
+    "Side filament hits the clamp strap"
+);
+assert(
+    thin_end_pin_z(-rib_x0 - hoop_clip / 2) > strap_z_hi_at_y(0) + filament_h / 2 + 0.6,
+    "Opposite-rib pin hits the clamp strap"
+);
+assert(
+    thin_end_pin_z(-rib_x0 - hoop_clip / 2) < thin_side_pin_z() - filament_h - 0.6,
+    "Opposite-rib pin hits the side filament"
 );
 assert(hoop_r(0) > inner_r + hoop_t, "Mesh hoop cuts the thin-rib inner clip");
 assert(hoop_r(hoop_count - 1) < thin_rib_r1 - hoop_t, "Mesh hoop cuts the thin-rib rim clip");
@@ -620,6 +679,13 @@ module rib_pole_fasteners() {
         }
 }
 
+module rib_pole_straps() {
+    world_to_rib_print()
+        rotate([0, 0, 90])
+            for (s = [-1, 1])
+                clamp_rib_strap_cut(s * station_pitch / 2);
+}
+
 module through_bore(h) {
     cylinder(h=h, d=bolt_hole, $fn=24);
 }
@@ -629,13 +695,23 @@ module filament_bore(h, d=filament_v) {
 }
 
 module rib_profile_2d() {
+    x_b = flange_hy;
+    n_a = max(2, ceil(n_para * (x_b - rib_x0) / (rib_r1 - rib_x0)));
+    n_b = max(2, n_para - n_a);
     polygon(concat(
-        [for (i = [0:n_para])
-            let (x = rib_x0 + (rib_r1 - rib_x0) * i / n_para)
+        [for (i = [0:n_a])
+            let (x = rib_x0 + (x_b - rib_x0) * i / n_a)
                 [x, z_of(x)]],
-        [for (i = [n_para:-1:0])
-            let (x = rib_x0 + (rib_r1 - rib_x0) * i / n_para)
-                [x, rib_back(x)]]
+        [for (i = [1:n_b])
+            let (x = x_b + (rib_r1 - x_b) * i / n_b)
+                [x, z_of(x)]],
+        [for (i = [n_b:-1:0])
+            let (x = x_b + (rib_r1 - x_b) * i / n_b)
+                [x, z_of(x) - rib_h]],
+        [[x_b, z_pad]],
+        [for (i = [n_a - 1:-1:0])
+            let (x = rib_x0 + (x_b - rib_x0) * i / n_a)
+                [x, z_pad]]
     ));
 }
 
@@ -686,6 +762,7 @@ module radial_rib() {
                 thin_rib_main_filament(thin_az(j));
         }
         rib_pole_fasteners();
+        rib_pole_straps();
     }
 }
 
@@ -710,7 +787,10 @@ module radial_rib_arm() {
                         }
                 }
                 rib_from_dish()
-                    arm_inner();
+                    difference() {
+                        arm_inner();
+                        arm_face_clip();
+                    }
             }
             rib_from_dish()
                 arm_insert_pads();
@@ -747,19 +827,67 @@ module clamp_station(station_y) {
     }
 }
 
+module clamp_station_outer_faces(station_y) {
+    outer = v_half + v_wall;
+    for (sx = [-1, 1])
+        translate([
+            sx > 0 ? outer - v_wall : -outer,
+            station_y - cheek_y / 2,
+            cheek_back
+        ])
+            cube([v_wall, cheek_y, z_pad - cheek_back]);
+}
+
+module pole_rib_support() {
+    translate([-rib_w / 2, -flange_hy, flange_back])
+        cube([rib_w, 2 * flange_hy, flange_t]);
+}
+
+module clamp_slot_2d() {
+    translate([0, strap_z_c()])
+        circle(r=strap_r(), $fn=64);
+}
+
+module clamp_rib_slot_2d() {
+    translate([0, strap_z_c()])
+        difference() {
+            circle(r=strap_r(), $fn=64);
+            circle(r=max(strap_r() - clamp_slot, 0.2), $fn=64);
+        }
+}
+
+module clamp_strap_cut(station_y) {
+    translate([0, station_y, 0])
+        rotate([90, 0, 0])
+            linear_extrude(strap_along, center=true, convexity=8)
+                clamp_slot_2d();
+}
+
+module clamp_rib_strap_cut(station_y) {
+    translate([0, station_y, 0])
+        rotate([90, 0, 0])
+            linear_extrude(strap_along, center=true, convexity=8)
+                clamp_rib_slot_2d();
+}
+
 module pole_bracket() {
     rotate([0, 0, 90])
         difference() {
             union() {
-                translate([-flange_hx, -flange_hy, flange_back])
-                    cube([2 * flange_hx, 2 * flange_hy, flange_t]);
+                difference() {
+                    union() {
+                        translate([-flange_hx, -flange_hy, flange_back])
+                            cube([2 * flange_hx, 2 * flange_hy, flange_t]);
+                        for (s = [-1, 1])
+                            clamp_station(s * station_pitch / 2);
+                    }
+                    for (s = [-1, 1])
+                        clamp_strap_cut(s * station_pitch / 2);
+                }
+                pole_rib_support();
                 for (s = [-1, 1])
-                    clamp_station(s * station_pitch / 2);
+                    clamp_station_outer_faces(s * station_pitch / 2);
             }
-            slot_h = max(clamp_slot, stair_z) + 0.2;
-            for (s = [-1, 1])
-                translate([0, s * station_pitch / 2, flange_back - (slot_h - 0.2) / 2])
-                    cube([2 * (v_half + v_wall) + 4, clamp_band_width + 1, slot_h], center=true);
             for (i = [0, 1])
                 translate([0, pole_bolt_x(i), flange_back - 1])
                     cylinder(h=flange_t + 2, d=bolt_d, $fn=24);
@@ -1045,6 +1173,8 @@ module enclosure_profile_2d() {
     union() {
         offset(delta=enc_wall)
             cavity_2d();
+        translate([enclosure_x / 2, -bolt_y])
+            square([enc_wall, 2 * bolt_y]);
         for (sx = [-1, 1], sy = [-1, 1])
             translate([sx * bolt_x, sy * bolt_y])
                 circle(r=boss_r, $fn=28);
@@ -1082,16 +1212,31 @@ module socket_wall_fill() {
 }
 
 module enclosure_socket_cuts() {
-    along_arm_enc() {
-        translate([-socket_len - 1, 0, 0])
-            rect_x(socket_len + 1.2, sock_across_id, sock_along_id);
-        translate([-1, 0, 0])
-            rect_x(enc_wall + 12, feed_across_id, feed_along_id);
-        for (s = [-1, 1])
-            translate([-socket_len + arm_end_keep, -sock_across_od / 2 - 1, s * arm_insert_off])
-                rotate([-90, 0, 0])
-                    through_bore(sock_across_od + 2);
+    intersection() {
+        along_arm_enc() {
+            translate([-socket_len - 1, 0, 0])
+                rect_x(socket_len + enc_wall + 12, sock_across_id, sock_along_id);
+            for (s = [-1, 1])
+                translate([-socket_len + arm_end_keep, -sock_across_od / 2 - 1, s * arm_insert_off])
+                    rotate([-90, 0, 0])
+                        through_bore(sock_across_od + 2);
+        }
+        translate([face_x, -500, -500])
+            cube([500, 1000, 1000]);
     }
+}
+
+module enclosure_face_vert_bore() {
+    translate([
+        enclosure_x / 2 - 1,
+        -feed_across_id / 2,
+        face_bore_z0() - focal_length
+    ])
+        cube([
+            enc_wall + 2,
+            feed_across_id,
+            face_bore_z1() - face_bore_z0()
+        ]);
 }
 
 module enclosure_body() {
@@ -1119,6 +1264,10 @@ module enclosure_body() {
             enclosure_socket_cuts();
             slab_z(-200, cavity_h - enc_z_keep);
         }
+        intersection() {
+            enclosure_face_vert_bore();
+            slab_z(-200, cavity_h - enc_z_keep);
+        }
         lid_inserts();
     }
 }
@@ -1135,6 +1284,47 @@ module lid() {
                 groove_2d();
         lid_screws(lid_flange + 2, -1);
     }
+}
+
+module cover_outer_2d() {
+    hull()
+        for (sx = [-1, 1], sy = [-1, 1])
+            translate([sx * bolt_x, sy * bolt_y])
+                circle(r=cover_r(), $fn=28);
+}
+
+module cover_skirt_2d() {
+    difference() {
+        difference() {
+            cover_outer_2d();
+            offset(delta=-cover_wall)
+                cover_outer_2d();
+        }
+        translate([bolt_x, -bolt_y])
+            square([cover_r() + 1, 2 * bolt_y]);
+    }
+}
+
+module reflector_lid() {
+    difference() {
+        union() {
+            linear_extrude(cover_roof, convexity=8)
+                cover_outer_2d();
+            translate([0, 0, -cover_skirt_h()])
+                linear_extrude(cover_skirt_h(), convexity=8)
+                    cover_skirt_2d();
+        }
+        translate([0, 0, -eps])
+            linear_extrude(groove_d + eps, convexity=4)
+                groove_2d();
+        lid_screws(cover_roof + 2, -1);
+    }
+}
+
+module reflector_lid_print() {
+    translate([0, 0, cover_roof])
+        mirror([0, 0, 1])
+            reflector_lid();
 }
 
 module gasket() {
@@ -1155,7 +1345,7 @@ module place_radome() {
 
 module place_reflector() {
     translate([0, 0, focal_length + cavity_h])
-        lid();
+        reflector_lid();
 }
 
 module place_gaskets() {
@@ -1206,7 +1396,7 @@ else if (part == "enclosure_body")
 else if (part == "radome_lid")
     lid();
 else if (part == "reflector_lid")
-    lid();
+    reflector_lid_print();
 else if (part == "gasket")
     gasket();
 else if (part == "pole_bracket")
